@@ -1,0 +1,95 @@
+{
+  "name": "game-deal-radar",
+  "private": true,
+  "version": "1.1.1-beta.1",
+  "description": "DealRift desktop radar for game deals, giveaways, and regional prices.",
+  "author": "EazyHood",
+  "license": "MIT",
+  "homepage": "https://github.com/EazyHood/DealRift#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/EazyHood/DealRift.git"
+  },
+  "bugs": {
+    "url": "https://github.com/EazyHood/DealRift/issues"
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "main": "electron/main.cjs",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c cyan,magenta \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:web": "vite",
+    "dev:api": "tsx watch server/run.ts",
+    "api": "tsx server/run.ts",
+    "build": "tsc -b && vite build && npm run build:server",
+    "build:server": "esbuild server/index.ts --bundle --platform=node --format=cjs --target=node20 --outfile=dist-server/index.cjs",
+    "electron:dev": "npm run build && electron .",
+    "dist:win": "npm run build && electron-builder --win portable --x64",
+    "lint": "oxlint",
+    "test": "tsx --test server/intelligence.test.ts server/security.test.ts server/storeLinks.test.ts server/persistence.test.ts server/apiSecurity.test.ts electron/security.test.cjs",
+    "check": "npm run lint && npm test && npm run build",
+    "preview": "npm run build && tsx server/preview.ts"
+  },
+  "build": {
+    "appId": "com.dealrift.radar",
+    "productName": "DealRift",
+    "copyright": "Copyright (c) 2026 EazyHood",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-server/index.cjs",
+      "electron/**/*",
+      "build/icon.png",
+      "package.json"
+    ],
+    "asar": true,
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "portable": {
+      "artifactName": "DealRift-${version}-portable.exe"
+    }
+  },
+  "dependencies": {
+    "compression": "^1.8.1",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "framer-motion": "^12.42.2",
+    "lucide-react": "^1.23.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "recharts": "^3.9.2",
+    "three": "^0.185.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/compression": "^1.8.1",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.13.2",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@types/three": "^0.185.0",
+    "@vitejs/plugin-react": "^6.0.3",
+    "concurrently": "^10.0.3",
+    "electron": "^43.1.0",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.1",
+    "oxlint": "^1.71.0",
+    "tsx": "^4.23.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.1.1"
+  }
+}

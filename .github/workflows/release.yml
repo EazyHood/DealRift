@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows-portable:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify source
+        run: |
+          npm run lint
+          npm test
+
+      - name: Build Windows portable application
+        run: npm run dist:win
+
+      - name: Create checksum
+        shell: pwsh
+        run: |
+          $artifact = Get-ChildItem -LiteralPath release -Filter '*.exe' | Select-Object -First 1
+          if (-not $artifact) { throw 'Portable executable was not generated.' }
+          $hash = (Get-FileHash -LiteralPath $artifact.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $($artifact.Name)" | Set-Content -LiteralPath release/SHA256SUMS.txt -Encoding ascii
+
+      - name: Publish GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $artifact = Get-ChildItem -LiteralPath release -Filter '*.exe' | Select-Object -First 1
+          $arguments = @(
+            'release', 'create', $env:GITHUB_REF_NAME,
+            $artifact.FullName,
+            (Resolve-Path release/SHA256SUMS.txt).Path,
+            '--title', "DealRift $env:GITHUB_REF_NAME",
+            '--generate-notes',
+            '--verify-tag'
+          )
+          if ($env:GITHUB_REF_NAME.Contains('-')) {
+            $arguments += '--prerelease'
+          } else {
+            $arguments += '--latest'
+          }
+          gh @arguments
