@@ -93,6 +93,11 @@ test('Xbox accepts a public free-to-play game but not a license-only or gift SKU
   const value = product()
   value.DisplaySkuAvailabilities[0].Availabilities = [offer(0, 0)]
   assert.equal(parse(value, { minSavings: 100 })[0].isFree, true)
+  const friendPass = structuredClone(value)
+  friendPass.LocalizedProperties[0].ProductTitle = 'It Takes Two - Pase de amigo'
+  assert.equal(parse(friendPass).length, 0)
+  friendPass.LocalizedProperties[0].ProductTitle = "Split Fiction Friend’s Pass"
+  assert.equal(parse(friendPass).length, 0)
   for (const actions of [['Details', 'License', 'Browse'], ['Details', 'Gift', 'Browse'], ['Details', 'Purchase']]) {
     value.DisplaySkuAvailabilities[0].Availabilities[0].Actions = actions
     assert.equal(parse(value).length, 0)

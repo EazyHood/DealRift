@@ -62,6 +62,7 @@ test('Plus prices, trials, preorder SKUs, DLC and unverified zero prices never b
     product({ storeDisplayClassification: 'LEVEL' }), product({ storeDisplayClassification: 'VIRTUAL_CURRENCY' }),
     product({ price: price({ basePrice: '$9.99', discountedPrice: '19,99 €' }) }),
     product({ id: '../../other' }), product({ platforms: ['PC'] }),
+    product({ name: 'It Takes Two - Pase de amigo', price: price({ basePrice: 'Gratuito', discountedPrice: 'Gratuito', isFree: true }) }),
   ]) assert.equal(parsePlayStationProduct(candidate, 'CO'), undefined)
   const free = parsePlayStationProduct(product({ price: price({ basePrice: 'Gratuito', discountedPrice: 'Gratuito', isFree: true }) }), 'CO')!
   assert.equal(free.isFree, true)

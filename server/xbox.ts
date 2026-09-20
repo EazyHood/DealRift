@@ -151,6 +151,7 @@ export function parseXboxProducts(payload: unknown, options: XboxOptions, now = 
     const selected = candidates.sort((a, b) => a.amount - b.amount)[0]
     const savings = selected.original > 0 ? Math.round((1 - selected.amount / selected.original) * 100) : 0
     const isFree = selected.amount === 0
+    if (isFree && /friend['’]?s?\s+pass|pase\s+de\s+amigo/i.test(title)) continue
     if (options.onlyFree && !isFree) continue
     if (!isFree && savings < options.minSavings) continue
     const discounted = selected.original > selected.amount

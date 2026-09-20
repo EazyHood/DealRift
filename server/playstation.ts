@@ -94,6 +94,7 @@ export function parsePlayStationProduct(value: unknown, country: string, detecte
   const platforms = array(product.platforms).filter((p): p is string => p === 'PS4' || p === 'PS5')
   const skus = array(product.skus).map(object)
   const price = object(product.price)
+  if (price.isFree === true && /friend['’]?s?\s+pass|pase\s+de\s+amigo/i.test(title)) return undefined
   if (!PRODUCT_ID.test(id) || !title || title.length > 300 || !GAME_CLASSES.has(classification) || !platforms.length) return undefined
   // A missing flag is not evidence that a price is available without a subscription.
   if (price.isTiedToSubscription !== false || price.isExclusive !== false) return undefined
