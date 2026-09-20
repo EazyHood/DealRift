@@ -37,6 +37,32 @@ body {
   min-height: 100svh;
 }
 
+:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 3px;
+}
+
+.startup-state {
+  width: min(540px, calc(100% - 40px));
+  margin: 18vh auto;
+  padding: 32px;
+  display: grid;
+  gap: 20px;
+  border: 1px solid var(--muted);
+  border-radius: 12px;
+  background: var(--panel);
+}
+.startup-state button {
+  min-height: 44px;
+  padding: 8px 20px;
+  background: var(--cyan);
+  border: 0;
+  border-radius: 6px;
+  color: #04100e;
+  font: inherit;
+  cursor: pointer;
+}
+
 ::selection {
   color: #04100e;
   background: var(--cyan);

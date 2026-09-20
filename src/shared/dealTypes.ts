@@ -108,6 +108,10 @@ export interface Deal {
   tags: string[]
   notes: string[]
   intelligence?: DealIntelligence
+  /** Country actually checked by the price provider, not an inferred activation region. */
+  priceCountry?: string
+  availability?: 'active' | 'upcoming' | 'expired'
+  freshness?: { updatedAt: string; stale: boolean; error?: string }
 }
 
 export interface RegionalPricePoint {
@@ -160,6 +164,9 @@ export interface SourceStatus {
   ok: boolean
   message: string
   updatedAt: string
+  stale?: boolean
+  error?: string
+  coverage?: 'catalog-search' | 'featured-sample' | 'catalog-sample' | 'reference-us'
 }
 
 export interface DealHistoryPoint {

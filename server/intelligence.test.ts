@@ -150,3 +150,26 @@ test('regional intelligence only rewards a country price that beats the current 
   assert.equal(withoutReward.intelligence?.reasons.some((reason) => reason.code === 'regional-advantage'), false)
   assert.equal(withReward.intelligence?.reasons.some((reason) => reason.code === 'regional-advantage'), true)
 })
+
+test('future, expired, stale and foreign prices do not affect rankings or observed history', () => {
+  const time = Date.parse('2026-01-02T00:00:00.000Z')
+  const current = makeDeal()
+  const unavailable = [
+    makeDeal({ id: 'upcoming', isFree: true, salePrice: { amount: 0, currency: 'USD', formatted: 'Free', usd: 0 }, startsAt: '2026-01-03T00:00:00Z' }),
+    makeDeal({ id: 'expired', expiresAt: '2026-01-01T00:00:00Z' }),
+    makeDeal({ id: 'stale', freshness: { updatedAt: '2026-01-01T00:00:00Z', stale: true, error: 'offline' } }),
+    makeDeal({ id: 'foreign', countries: ['CO'], priceCountry: 'CO' }),
+  ]
+  const enriched = enrichDealsWithIntelligence([current, ...unavailable], 'US', emptyPriceHistory(), time)
+  assert.equal(enriched[0].intelligence?.market.offerCount, 1)
+  for (const deal of enriched.slice(1)) {
+    assert.equal(deal.intelligence?.score, 0)
+    assert.equal(deal.intelligence?.verdict, 'wait')
+    assert.equal(deal.intelligence?.market.offerCount, 0)
+  }
+  const history = recordPriceObservations(emptyPriceHistory(), [current, ...unavailable], 'US', new Date(time).toISOString())
+  const point = history.games['US:alpha-game'].observations[0]
+  assert.equal(point.free, false)
+  assert.equal(point.offerCount, 1)
+  assert.equal(point.bestPaidUsd, 20)
+})

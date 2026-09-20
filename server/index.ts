@@ -8,14 +8,18 @@ import { z } from 'zod'
 import {
   emptyPriceHistory,
   enrichDealsWithIntelligence,
+  canonicalGameKey,
+  isCurrentVerifiedDeal,
   parsePriceHistory,
   priceHistoryStats,
   recordPriceObservations,
   type DealPriceHistoryDatabase,
 } from './intelligence.js'
 import { writeJsonAtomic } from './persistence.js'
+import { registerLibraryRoutes } from './library.js'
 import { isAllowedCorsOrigin, SECURITY_HEADERS } from './security.js'
-import { storeSearchUrl, trustedStoreUrl } from './storeLinks.js'
+import { cheapSharkDealUrl, trustedStoreUrl } from './storeLinks.js'
+import type { GameHistoryResponse } from '../src/shared/libraryTypes.js'
 import type {
   Deal,
   DealHistoryPoint,
@@ -30,17 +34,20 @@ import type {
 } from '../src/shared/dealTypes.js'
 
 const PORT = Number(process.env.PORT ?? 5174)
-const USER_AGENT = process.env.RADAR_USER_AGENT ?? 'GameDealRadar/0.1 (local-dev; contact: local@example.invalid)'
+const USER_AGENT = process.env.RADAR_USER_AGENT ?? 'DealRift/1.1 (https://github.com/EazyHood/DealRift)'
 const REFRESH_SECONDS = 300
-const APP_VERSION = process.env.DEALRIFT_VERSION ?? '1.1.1-beta.1'
+const APP_VERSION = process.env.DEALRIFT_VERSION ?? '1.2.0-beta.1'
 const dataDir = process.env.DEALRIFT_DATA_DIR ? path.resolve(process.env.DEALRIFT_DATA_DIR) : path.join(process.cwd(), 'data')
 const historyFile = path.join(dataDir, 'deal-history.json')
 const priceHistoryFile = path.join(dataDir, 'deal-price-history.json')
 
 type CacheEntry<T> = { expiresAt: number; value: T; updatedAt: string }
+type Cached<T> = { value: T; updatedAt: string; stale: boolean; error?: string }
 
 const cache = new Map<string, CacheEntry<unknown>>()
 let priceHistoryWriteQueue = Promise.resolve()
+let historyWriteQueue = Promise.resolve()
+const cacheLoads = new Map<string, Promise<Cached<unknown>>>()
 
 const cheapSharkBase = 'https://www.cheapshark.com/api/1.0'
 const epicBase = 'https://store-site-backend-static.ak.epicgames.com/freeGamesPromotions'
@@ -163,8 +170,8 @@ const marketplaceTemplates = [
 ]
 
 const querySchema = z.object({
-  country: z.string().length(2).default('US').transform((value) => value.toUpperCase()),
-  locale: z.string().default('en-US'),
+  country: z.string().regex(/^[a-zA-Z]{2}$/).default('US').transform((value) => value.toUpperCase()),
+  locale: z.string().min(2).max(35).regex(/^[a-zA-Z0-9-]+$/).default('en-US'),
   limit: z.coerce.number().int().min(10).max(120).default(70),
   minSavings: z.coerce.number().min(0).max(100).default(0),
   search: z.string().trim().max(80).optional().catch(undefined),
@@ -181,14 +188,14 @@ app.use(cors({
   origin(origin, callback) {
     callback(null, isAllowedCorsOrigin(origin))
   },
-  methods: ['GET', 'OPTIONS'],
+  methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Accept', 'Content-Type'],
   maxAge: 86_400,
 }))
 app.use(compression())
 
 function nowIso() {
-  return new Date().toISOString()
+  return new Date(Date.now()).toISOString()
 }
 
 function roundMoney(value: number) {
@@ -224,23 +231,31 @@ function gogCurrency(country: string) {
 
 function titleMatches(title: string, search?: string) {
   if (!search) return true
-  return title.toLowerCase().includes(search.toLowerCase())
+  const normalizedTitle = canonicalGameKey(title).replace(/-/g, ' ')
+  const normalizedSearch = canonicalGameKey(search).replace(/-/g, ' ')
+  return (` ${normalizedTitle}`).includes(` ${normalizedSearch}`)
 }
 
-async function withCache<T>(key: string, ttlMs: number, loader: () => Promise<T>): Promise<T> {
+async function withCache<T>(key: string, ttlMs: number, loader: () => Promise<T>): Promise<Cached<T>> {
   const existing = cache.get(key) as CacheEntry<T> | undefined
   if (existing && existing.expiresAt > Date.now()) {
-    return existing.value
+    return { value: existing.value, updatedAt: existing.updatedAt, stale: false }
   }
-
-  try {
-    const value = await loader()
-    cache.set(key, { expiresAt: Date.now() + ttlMs, value, updatedAt: nowIso() })
-    return value
-  } catch (error) {
-    if (existing) return existing.value
-    throw error
-  }
+  const pending = cacheLoads.get(key)
+  if (pending) return pending as Promise<Cached<T>>
+  const load = (async (): Promise<Cached<T>> => {
+    try {
+      const value = await loader()
+      const updatedAt = nowIso()
+      cache.set(key, { expiresAt: Date.now() + ttlMs, value, updatedAt })
+      return { value, updatedAt, stale: false }
+    } catch (error) {
+      if (existing) return { value: existing.value, updatedAt: existing.updatedAt, stale: true, error: error instanceof Error ? error.message : 'Source refresh failed.' }
+      throw error
+    }
+  })()
+  cacheLoads.set(key, load)
+  try { return await load } finally { cacheLoads.delete(key) }
 }
 
 async function fetchJson<T>(url: string, timeoutMs = 12000): Promise<T> {
@@ -366,6 +381,10 @@ interface SteamFeaturedResponse {
 interface SteamAppDetails {
   success: boolean
   data?: {
+    name?: string
+    type?: string
+    header_image?: string
+    platforms?: { windows?: boolean; mac?: boolean; linux?: boolean }
     price_overview?: {
       currency: string
       initial: number
@@ -451,7 +470,6 @@ function mapCheapSharkDeal(deal: CheapSharkDeal, stores: Map<string, StoreSummar
   const metacriticScore = Number(deal.metacriticScore)
   const steamRatingPercent = Number(deal.steamRatingPercent)
   const sourceKind = store?.kind ?? 'authorized'
-  const isDirectStoreLink = Boolean(deal.steamAppID && store?.name.toLowerCase().includes('steam'))
   const signalScore =
     Math.min(45, savings * 0.45) +
     Math.min(22, dealScore * 2.2) +
@@ -466,7 +484,7 @@ function mapCheapSharkDeal(deal: CheapSharkDeal, stores: Map<string, StoreSummar
     sourceKind,
     platform: platformForStore(store?.name ?? 'CheapShark', Boolean(deal.steamAppID)),
     image: deal.thumb ?? '',
-    url: storeSearchUrl(store?.name ?? 'CheapShark', deal.title, deal.steamAppID || undefined),
+    url: cheapSharkDealUrl(deal.dealID),
     salePrice: {
       amount: sale,
       currency: 'USD',
@@ -488,19 +506,18 @@ function mapCheapSharkDeal(deal: CheapSharkDeal, stores: Map<string, StoreSummar
     steamAppId: deal.steamAppID || undefined,
     detectedAt: deal.lastChange ? new Date(deal.lastChange * 1000).toISOString() : nowIso(),
     isFree: sale <= 0,
-    countries: ['US', 'Global'],
+    countries: ['US'],
+    priceCountry: 'US',
     riskLevel: sourceRisk(sourceKind),
     confidence: 'live-api',
     tags: [
       sourceKind,
       savings >= 80 ? 'deep-cut' : 'sale',
       deal.steamAppID && sale > 0 ? 'regional-scan-ready' : sale <= 0 ? 'free-game' : 'pc',
-      isDirectStoreLink ? 'direct-store-link' : 'store-search-link',
+      'provider-redirect',
     ],
     notes: [
-      isDirectStoreLink
-        ? 'Price comes from CheapShark; the link opens the product directly on Steam without a CheapShark redirect.'
-        : 'Price comes from CheapShark; the link opens a clean search on the retailer because the feed does not expose a stable product URL.',
+      'US reference price from CheapShark. The required CheapShark redirect opens the retailer offer; verify activation region and checkout price.',
       deal.steamAppID && sale > 0
         ? 'Steam country scan can compare regional pricing for this paid offer.'
         : sale <= 0
@@ -538,13 +555,14 @@ function mapEpicFreebies(response: EpicResponse, country: string, locale: string
 
   for (const element of elements) {
     const { current, upcoming } = epicPromos(element)
-    const promo = current[0] ?? upcoming[0]
+    const time = Date.now()
+    const validPromos = [...current, ...upcoming].filter((promo) =>
+      promo.discountSetting?.discountPercentage === 0 && promo.startDate && promo.endDate
+      && Number.isFinite(Date.parse(promo.startDate)) && Date.parse(promo.endDate) > time,
+    ).sort((a, b) => Date.parse(a.startDate!) - Date.parse(b.startDate!))
+    const promo = validPromos[0]
     if (!promo) continue
-
-    const discount = promo.discountSetting?.discountPercentage
-    const isFree = discount === 0 || element.price?.totalPrice?.discountPrice === 0
-    const isUpcoming = current.length === 0
-    if (!isFree && discount !== 100) continue
+    const isUpcoming = Date.parse(promo.startDate!) > time
 
     const originalAmount = (element.price?.totalPrice?.originalPrice ?? 0) / 100
     const currency = element.price?.totalPrice?.currencyCode ?? 'USD'
@@ -560,8 +578,8 @@ function mapEpicFreebies(response: EpicResponse, country: string, locale: string
       salePrice: {
         amount: 0,
         currency,
-        formatted: 'Free',
-        usd: currency === 'USD' ? 0 : undefined,
+        formatted: isUpcoming ? 'Upcoming giveaway' : 'Free',
+        usd: 0,
       },
       normalPrice: originalAmount
         ? {
@@ -570,14 +588,16 @@ function mapEpicFreebies(response: EpicResponse, country: string, locale: string
             formatted: element.price?.totalPrice?.fmtPrice?.originalPrice ?? `${originalAmount.toFixed(2)} ${currency}`,
           }
         : undefined,
-      savingsPercent: 100,
-      dealScore: 10,
-      signalScore: isUpcoming ? 86 : 96,
+      savingsPercent: isUpcoming ? 0 : 100,
+      dealScore: isUpcoming ? 0 : 10,
+      signalScore: isUpcoming ? 0 : 96,
       startsAt: promo.startDate,
       expiresAt: promo.endDate,
       detectedAt: nowIso(),
-      isFree: true,
+      isFree: !isUpcoming,
       countries: [country],
+      priceCountry: country,
+      availability: isUpcoming ? 'upcoming' : 'active',
       riskLevel: 'low',
       confidence: 'live-api',
       tags: ['free-game', isUpcoming ? 'upcoming' : 'claim-now', 'official'],
@@ -591,11 +611,11 @@ function mapEpicFreebies(response: EpicResponse, country: string, locale: string
   return mapped
 }
 
-function mapSteamSpecials(response: SteamFeaturedResponse, country: string, locale: string, rates: Record<string, number>, search?: string): Deal[] {
+function mapSteamSpecials(response: SteamFeaturedResponse, country: string, locale: string, rates: Record<string, number>, search?: string, includeFullPrice = false): Deal[] {
   const items = response.specials?.items ?? []
 
   return items
-    .filter((item) => item.name && item.type === 0 && (item.discount_percent ?? 0) > 0 && titleMatches(item.name, search))
+    .filter((item) => item.name && item.type === 0 && typeof item.final_price === 'number' && Number.isFinite(item.final_price) && item.final_price >= 0 && (includeFullPrice || (item.discount_percent ?? 0) > 0) && titleMatches(item.name, search))
     .map((item) => {
       const currency = item.currency ?? 'USD'
       const final = (item.final_price ?? 0) / 100
@@ -638,6 +658,7 @@ function mapSteamSpecials(response: SteamFeaturedResponse, country: string, loca
         detectedAt: nowIso(),
         isFree: final <= 0,
         countries: [country],
+        priceCountry: country,
         riskLevel: 'low',
         confidence: 'live-api',
         tags: ['official', 'steam-specials', final > 0 ? 'regional-scan-ready' : 'free-game'],
@@ -655,7 +676,8 @@ function mapGogDeals(response: GogCatalogResponse, country: string, locale: stri
   return products
     .filter((product) => {
       const productType = product.productType ?? 'game'
-      return ['game', 'pack'].includes(productType) && titleMatches(product.title, search)
+      const amount = product.price?.finalMoney?.amount
+      return ['game', 'pack'].includes(productType) && amount !== undefined && amount !== '' && Number.isFinite(Number(amount)) && Number(amount) >= 0 && titleMatches(product.title, search)
     })
     .map((product) => {
       const currency = product.price?.finalMoney?.currency ?? product.price?.baseMoney?.currency ?? gogCurrency(country)
@@ -696,6 +718,7 @@ function mapGogDeals(response: GogCatalogResponse, country: string, locale: stri
         detectedAt: nowIso(),
         isFree: final <= 0,
         countries: [country],
+        priceCountry: country,
         riskLevel: 'low',
         confidence: 'live-api',
         tags: ['official', 'gog-catalog', 'drm-free', product.productType ?? 'game'],
@@ -731,8 +754,8 @@ async function getCheapSharkDeals(limit: number, minSavings: number, search?: st
       fetchJson<CheapSharkDeal[]>(`${cheapSharkBase}/deals?${params.toString()}`),
     ])
 
-    const storeMap = new Map(stores.map((store) => [store.id, store]))
-    return deals.map((deal) => mapCheapSharkDeal(deal, storeMap)).filter((deal) => deal.savingsPercent >= minSavings)
+    const storeMap = new Map(stores.value.map((store) => [store.id, store]))
+    return deals.filter((deal) => titleMatches(deal.title, search)).map((deal) => mapCheapSharkDeal(deal, storeMap)).filter((deal) => deal.savingsPercent >= minSavings)
   })
 }
 
@@ -761,7 +784,8 @@ async function getSteamSpecials(country: string, locale: string, limit: number, 
       fetchJson<SteamFeaturedResponse>(`${steamFeaturedBase}?${params.toString()}`),
     ])
 
-    return mapSteamSpecials(response, country, locale, rates, search)
+    if (rates.stale) throw new Error(`Exchange rates unavailable: ${rates.error}`)
+    return mapSteamSpecials(response, country, locale, rates.value, search)
       .filter((deal) => deal.savingsPercent >= minSavings)
       .slice(0, Math.min(limit, 50))
   })
@@ -774,19 +798,49 @@ async function getGogDeals(country: string, locale: string, limit: number, minSa
     const params = new URLSearchParams({
       limit: String(Math.min(limit * 2, 100)),
       order: 'desc:discount',
-      discounted: 'true',
+      discounted: 'eq:true',
       countryCode: country,
       locale: gogLocale(locale),
       currencyCode: currency,
     })
+    if (search) params.set('query', `like:${search}`)
     const [rates, response] = await Promise.all([
       getExchangeRates(),
       fetchJson<GogCatalogResponse>(`${gogCatalogBase}?${params.toString()}`),
     ])
 
-    return mapGogDeals(response, country, locale, rates, search)
+    if (rates.stale) throw new Error(`Exchange rates unavailable: ${rates.error}`)
+    return mapGogDeals(response, country, locale, rates.value, search)
       .filter((deal) => deal.savingsPercent >= minSavings)
       .slice(0, Math.min(limit, 50))
+  })
+}
+
+async function getSteamSearchDetails(country: string, locale: string, search: string, discovered: Deal[]) {
+  const explicitId = search.match(/^(?:steam:)?(\d{1,10})$/i)?.[1]
+  const appIds = [...new Set(explicitId ? [explicitId] : discovered.map((deal) => deal.steamAppId).filter((id): id is string => Boolean(id && /^\d{1,10}$/.test(id))))].slice(0, 8)
+  return withCache(`steam-lookup:${country}:${locale}:${search}:${appIds.join(',')}`, REFRESH_SECONDS * 1000, async () => {
+    if (appIds.length === 0) return [] as Deal[]
+    const rates = await getExchangeRates()
+    if (rates.stale) throw new Error(`Exchange rates unavailable: ${rates.error}`)
+    const rows = await Promise.all(appIds.map(async (appId) => {
+      const params = new URLSearchParams({ appids: appId, cc: country.toLowerCase(), l: steamLanguage(locale), filters: 'basic,price_overview,platforms' })
+      const response = await fetchJson<Record<string, SteamAppDetails>>(`https://store.steampowered.com/api/appdetails?${params}`)
+      const item = response[appId]
+      const data = item?.data
+      const price = data?.price_overview
+      if (!item?.success || !data?.name || data.type !== 'game' || !price) return []
+      return mapSteamSpecials({ specials: { items: [{
+        id: Number(appId), type: 0, name: data.name, header_image: data.header_image,
+        currency: price.currency, original_price: price.initial, final_price: price.final,
+        discount_percent: price.discount_percent, windows_available: data.platforms?.windows,
+        mac_available: data.platforms?.mac, linux_available: data.platforms?.linux,
+      }] } }, country, locale, rates.value, explicitId ? undefined : search, true).map((deal) => ({
+        ...deal, tags: deal.tags.filter((tag) => tag !== 'steam-specials').concat('steam-product-lookup'),
+        notes: [`Steam product price checked for app ${appId} in ${country}. Search discovery is limited to IDs supplied by CheapShark or an explicit Steam app ID.`],
+      }))
+    }))
+    return rows.flat()
   })
 }
 
@@ -803,7 +857,8 @@ async function getExchangeRates() {
 function toUsd(amount: number, currency: string, rates: Record<string, number>) {
   if (currency === 'USD') return amount
   const rate = rates[currency]
-  return rate ? amount / rate : amount
+  if (!rate || !Number.isFinite(rate) || rate <= 0) throw new Error(`No reliable USD exchange rate for ${currency}.`)
+  return amount / rate
 }
 
 async function fetchSteamCountryPrice(
@@ -854,23 +909,25 @@ async function fetchSteamCountryPrice(
   } satisfies RegionalPricePoint
 }
 
-async function getRegionalScan(appId: string, title: string, baselineCountry = 'US'): Promise<RegionalScan> {
+async function getRegionalScan(appId: string, title: string, baselineCountry = 'US'): Promise<Cached<RegionalScan>> {
   const countries = Array.from(new Set([baselineCountry, ...scanCountries])).slice(0, 28)
   const cacheKey = `steam-region:${appId}:${baselineCountry}:${countries.join(',')}`
 
   return withCache<RegionalScan>(cacheKey, 15 * 60 * 1000, async () => {
     const rates = await getExchangeRates()
+    if (rates.stale) throw new Error(`Exchange rates unavailable: ${rates.error}`)
     const settled = await Promise.allSettled(
-      countries.map((country) => fetchSteamCountryPrice(appId, country, baselineCountry, rates)),
+      countries.map((country) => fetchSteamCountryPrice(appId, country, baselineCountry, rates.value)),
     )
 
     const rows = settled
       .filter((entry): entry is PromiseFulfilledResult<RegionalPricePoint> => entry.status === 'fulfilled')
       .map((entry) => entry.value)
+    if (rows.length === 0) throw new Error('Steam regional prices are unavailable.')
 
     const available = rows.filter((row) => row.available && row.usd > 0)
-    const baseline = available.find((row) => row.countryCode === baselineCountry) ?? available.find((row) => row.countryCode === 'US')
-    const baselineUsd = baseline?.usd ?? available[0]?.usd ?? 0
+    const baseline = available.find((row) => row.countryCode === baselineCountry)
+    const baselineUsd = baseline?.usd ?? 0
 
     const normalized = rows
       .map((row) => ({
@@ -918,12 +975,17 @@ function attachRegionalHighlights(deals: Deal[], scans: RegionalScan[]) {
   })
 }
 
-function dedupeDeals(deals: Deal[]) {
+function dedupeDeals(deals: Deal[], country: string) {
   const byKey = new Map<string, Deal>()
+  const local = new Set(deals.filter((deal) => deal.priceCountry === country && !deal.freshness?.stale)
+    .map((deal) => `${deal.source.toLowerCase()}:${canonicalGameKey(deal.title)}`))
 
   for (const deal of deals) {
-    const titleKey = deal.title.toLowerCase().replace(/[^a-z0-9]+/g, '-')
-    const key = `${deal.source.toLowerCase()}:title:${titleKey}`
+    const titleKey = canonicalGameKey(deal.title)
+    const identity = `${deal.source.toLowerCase()}:${titleKey}`
+    // A US reference quote must never displace the selected country's product price.
+    if (deal.priceCountry !== country && local.has(identity)) continue
+    const key = `${identity}:${deal.priceCountry ?? deal.countries.join(',')}:${deal.salePrice.currency}`
     const existing = byKey.get(key)
     if (!existing) {
       byKey.set(key, deal)
@@ -932,8 +994,8 @@ function dedupeDeals(deals: Deal[]) {
 
     const dealPrice = deal.salePrice.usd ?? deal.salePrice.amount
     const existingPrice = existing.salePrice.usd ?? existing.salePrice.amount
-    const dealIsDirect = !deal.tags.includes('store-search-link')
-    const existingIsDirect = !existing.tags.includes('store-search-link')
+    const dealIsDirect = !deal.tags.includes('store-search-link') && !deal.tags.includes('provider-redirect')
+    const existingIsDirect = !existing.tags.includes('store-search-link') && !existing.tags.includes('provider-redirect')
     if (
       (dealIsDirect && !existingIsDirect) ||
       (dealIsDirect === existingIsDirect && (dealPrice < existingPrice || (dealPrice === existingPrice && deal.signalScore > existing.signalScore)))
@@ -974,7 +1036,8 @@ function buildMarketScouts(deals: Deal[], search?: string): MarketScout[] {
   )
 }
 
-function metricsFor(deals: Deal[], regionalScans: RegionalScan[]): RadarMetrics {
+function metricsFor(deals: Deal[], regionalScans: RegionalScan[], country: string): RadarMetrics {
+  deals = deals.filter((deal) => isCurrentVerifiedDeal(deal, country))
   const savings = deals.map((deal) => deal.savingsPercent).filter(Number.isFinite)
   const bestCountries = regionalScans
     .map((scan) => scan.best)
@@ -1011,7 +1074,7 @@ async function writeHistory(points: DealHistoryPoint[]) {
 }
 
 async function recordHistory(response: RadarResponse) {
-  const topDeal = response.deals[0]
+  const topDeal = response.deals.find((deal) => isCurrentVerifiedDeal(deal, response.country))
   const nextPoint: DealHistoryPoint = {
     updatedAt: response.updatedAt,
     totalDeals: response.metrics.totalDeals,
@@ -1035,12 +1098,11 @@ async function readPriceHistory(): Promise<DealPriceHistoryDatabase> {
   }
 }
 
-function writePriceHistory(database: DealPriceHistoryDatabase) {
-  const write = async () => {
-    await writeJsonAtomic(priceHistoryFile, database)
-  }
-  priceHistoryWriteQueue = priceHistoryWriteQueue.then(write, write)
-  return priceHistoryWriteQueue
+function withPriceHistory<T>(operation: (database: DealPriceHistoryDatabase) => Promise<T>) {
+  // Serialize the entire read/modify/write transaction, not just the final rename.
+  const transaction = priceHistoryWriteQueue.then(async () => operation(await readPriceHistory()))
+  priceHistoryWriteQueue = transaction.then(() => undefined, () => undefined)
+  return transaction
 }
 
 app.get('/api/health', async (_req, res) => {
@@ -1062,7 +1124,7 @@ app.get('/api/history', async (_req, res) => {
 
 app.get('/api/stores', async (_req, res) => {
   try {
-    res.json(await getStores())
+    res.json((await getStores()).value)
   } catch (error) {
     res.status(502).json({ error: error instanceof Error ? error.message : 'Unable to load stores.' })
   }
@@ -1074,128 +1136,151 @@ app.get('/api/regions/:appId', async (req, res) => {
   const title = String(req.query.title ?? `Steam app ${appId}`)
 
   try {
-    res.json(await getRegionalScan(appId, title, country))
+    if (!/^\d{1,10}$/.test(appId) || !/^[A-Z]{2}$/.test(country)) {
+      res.status(400).json({ error: 'Invalid Steam app or country.' })
+      return
+    }
+    const scan = await getRegionalScan(appId, title, country)
+    res.json({ ...scan.value, freshness: { updatedAt: scan.updatedAt, stale: scan.stale, error: scan.error } })
   } catch (error) {
     res.status(502).json({ error: error instanceof Error ? error.message : 'Unable to scan Steam regions.' })
   }
 })
 
-app.get('/api/radar', async (req, res) => {
-  const parsed = querySchema.safeParse(req.query)
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.flatten() })
-    return
-  }
+function sourceResultStatus<T>(name: string, result: PromiseSettledResult<Cached<T>>, message: string, coverage?: SourceStatus['coverage']): SourceStatus {
+  if (result.status === 'rejected') return { ...status(name, false, result.reason instanceof Error ? result.reason.message : 'Source unavailable.'), coverage }
+  const { updatedAt, stale, error } = result.value
+  return { name, ok: !stale, message: stale ? `Cached data from ${updatedAt}; refresh failed: ${error}` : message, updatedAt, stale, error, coverage }
+}
 
-  const { country, locale, limit, minSavings, search, regionSample } = parsed.data
+function cachedDeals(result: PromiseSettledResult<Cached<Deal[]>>, country: string): Deal[] {
+  if (result.status !== 'fulfilled') return []
+  const { value, updatedAt, stale, error } = result.value
+  return value.map((deal) => {
+    const upcoming = Boolean(deal.startsAt && Date.parse(deal.startsAt) > Date.now())
+    const expired = Boolean(deal.expiresAt && Date.parse(deal.expiresAt) <= Date.now())
+    const wasScheduled = deal.availability === 'upcoming'
+    // Never silently promote a cached schedule into a confirmed active giveaway.
+    const needsRefresh = wasScheduled && !upcoming
+    const unavailable = stale || needsRefresh
+    return {
+      ...deal,
+      availability: expired ? 'expired' : upcoming || needsRefresh ? 'upcoming' : 'active',
+      confidence: unavailable ? 'fallback' : deal.confidence,
+      freshness: { updatedAt, stale: unavailable, error: needsRefresh ? 'Promotion must be refreshed before it can be claimed.' : error },
+      tags: Array.from(new Set([...deal.tags, ...(unavailable ? ['stale'] : []), ...(deal.priceCountry !== country ? ['foreign-price'] : [])])),
+    } satisfies Deal
+  })
+}
+
+export interface LoadRadarParams {
+  country: string
+  locale: string
+  limit: number
+  minSavings: number
+  search?: string
+  regionSample: number
+}
+
+export async function loadRadar(params: LoadRadarParams): Promise<RadarResponse> {
+  const { country, locale, limit, minSavings, search, regionSample } = querySchema.parse(params)
   const sourceStatus: SourceStatus[] = []
-
   const [storesResult, cheapResult, epicResult, steamResult, gogResult] = await Promise.allSettled([
-    getStores(),
-    getCheapSharkDeals(limit, minSavings, search),
-    getEpicDeals(country, locale),
-    getSteamSpecials(country, locale, limit, minSavings, search),
-    getGogDeals(country, locale, limit, minSavings, search),
+    getStores(), getCheapSharkDeals(limit, minSavings, search), getEpicDeals(country, locale),
+    getSteamSpecials(country, locale, limit, minSavings, search), getGogDeals(country, locale, limit, minSavings, search),
   ])
-
-  const stores = storesResult.status === 'fulfilled' ? storesResult.value : []
+  const stores = storesResult.status === 'fulfilled' ? storesResult.value.value : []
+  const cheapDeals = cachedDeals(cheapResult, country)
+  const epicDeals = cachedDeals(epicResult, country).filter((deal) => titleMatches(deal.title, search))
+  let steamDeals = cachedDeals(steamResult, country)
+  const gogDeals = cachedDeals(gogResult, country)
   sourceStatus.push(
-    storesResult.status === 'fulfilled'
-      ? status('CheapShark stores', true, 'Store index loaded.')
-      : status('CheapShark stores', false, storesResult.reason instanceof Error ? storesResult.reason.message : 'Store index failed.'),
+    sourceResultStatus('CheapShark stores', storesResult, 'Store index loaded.'),
+    sourceResultStatus('CheapShark deals', cheapResult, `${cheapDeals.length} US reference offers. Regional activation and checkout prices require verification.`, 'reference-us'),
+    sourceResultStatus('Epic giveaways', epicResult, `${epicDeals.length} current or upcoming promotions for ${country}.`),
+    sourceResultStatus('Steam specials', steamResult, `${steamDeals.length} matches in Steam featured specials for ${country}; this is not a full catalog search.`, 'featured-sample'),
+    sourceResultStatus('GOG catalog', gogResult, search
+      ? `${gogDeals.length} discounted catalog matches for "${search}" in ${country}; at most ${Math.min(limit * 2, 100)} provider results checked.`
+      : `${gogDeals.length} discounted entries in a sample of up to ${Math.min(limit * 2, 100)} catalog products for ${country}.`, search ? 'catalog-search' : 'catalog-sample'),
   )
-
-  const cheapDeals = cheapResult.status === 'fulfilled' ? cheapResult.value : []
-  sourceStatus.push(
-    cheapResult.status === 'fulfilled'
-      ? status('CheapShark deals', true, `${cheapDeals.length} live deals loaded.`)
-      : status('CheapShark deals', false, cheapResult.reason instanceof Error ? cheapResult.reason.message : 'Deals failed.'),
-  )
-
-  const epicDeals = epicResult.status === 'fulfilled' ? epicResult.value : []
-  sourceStatus.push(
-    epicResult.status === 'fulfilled'
-      ? status('Epic giveaways', true, `${epicDeals.length} giveaways loaded for ${country}.`)
-      : status('Epic giveaways', false, epicResult.reason instanceof Error ? epicResult.reason.message : 'Epic promotions failed.'),
-  )
-
-  const steamDeals = steamResult.status === 'fulfilled' ? steamResult.value : []
-  sourceStatus.push(
-    steamResult.status === 'fulfilled'
-      ? status('Steam specials', true, `${steamDeals.length} official specials loaded for ${country}.`)
-      : status('Steam specials', false, steamResult.reason instanceof Error ? steamResult.reason.message : 'Steam specials failed.'),
-  )
-
-  const gogDeals = gogResult.status === 'fulfilled' ? gogResult.value : []
-  sourceStatus.push(
-    gogResult.status === 'fulfilled'
-      ? status('GOG catalog', true, `${gogDeals.length} discounted catalog entries loaded for ${country}.`)
-      : status('GOG catalog', false, gogResult.reason instanceof Error ? gogResult.reason.message : 'GOG catalog failed.'),
-  )
-
+  if (search) {
+    const [lookup] = await Promise.allSettled([getSteamSearchDetails(country, locale, search, cheapDeals)])
+    const products = cachedDeals(lookup, country).filter((deal) => deal.savingsPercent >= minSavings)
+    steamDeals = [...steamDeals, ...products]
+    sourceStatus.push(sourceResultStatus('Steam product lookup', lookup, `${products.length} regional products checked. Discovery is limited to up to 8 Steam IDs from CheapShark or an explicit numeric Steam app ID; unmatched titles do not mean unavailable.`, 'featured-sample'))
+  }
   const seenRegionalApps = new Set<string>()
-  const regionTargets = [...cheapDeals, ...steamDeals]
-    .filter((deal) => deal.steamAppId && !deal.isFree)
+  const regionTargets = [...steamDeals, ...cheapDeals]
+    .filter((deal) => deal.steamAppId && !deal.isFree && !deal.freshness?.stale)
     .sort((a, b) => b.signalScore - a.signalScore)
     .filter((deal) => {
       if (!deal.steamAppId || seenRegionalApps.has(deal.steamAppId)) return false
       seenRegionalApps.add(deal.steamAppId)
       return true
-    })
-    .slice(0, regionSample)
-
-  const regionalSettled = await Promise.allSettled(
-    regionTargets.map((deal) => getRegionalScan(deal.steamAppId!, deal.title, country)),
-  )
-
+    }).slice(0, regionSample)
+  const regionalSettled = await Promise.allSettled(regionTargets.map((deal) => getRegionalScan(deal.steamAppId!, deal.title, country)))
+  // Stale scans remain available from /api/regions with their timestamp but cannot boost current rankings.
   const regionalScans = regionalSettled
-    .filter((entry): entry is PromiseFulfilledResult<RegionalScan> => entry.status === 'fulfilled')
-    .map((entry) => entry.value)
-
-  const regionalFailures = regionalSettled.filter((entry) => entry.status === 'rejected').length
-  sourceStatus.push(
-    regionalFailures === 0
-      ? status('Steam regional scan', true, `${regionalScans.length} games compared across countries.`)
-      : status('Steam regional scan', false, `${regionalScans.length} scans loaded, ${regionalFailures} failed.`),
-  )
-
-  const baseDeals = attachRegionalHighlights(dedupeDeals([...epicDeals, ...steamDeals, ...gogDeals, ...cheapDeals]), regionalScans)
-  const priceHistory = await readPriceHistory()
-  const allDeals = enrichDealsWithIntelligence(baseDeals, country, priceHistory)
-    .sort((a, b) => (b.intelligence?.score ?? b.signalScore) - (a.intelligence?.score ?? a.signalScore) || b.signalScore - a.signalScore)
-    .slice(0, limit)
-
-  const nextPriceHistory = recordPriceObservations(priceHistory, allDeals, country)
+    .filter((entry): entry is PromiseFulfilledResult<Cached<RegionalScan>> => entry.status === 'fulfilled' && !entry.value.stale)
+    .map((entry) => entry.value.value)
+  const regionalFailures = regionalSettled.length - regionalScans.length
+  sourceStatus.push(status('Steam regional scan', regionalFailures === 0, `${regionalScans.length} current comparisons; ${regionalFailures} failed or stale scans.`))
+  const baseDeals = attachRegionalHighlights(dedupeDeals([...epicDeals, ...steamDeals, ...gogDeals, ...cheapDeals], country), regionalScans)
+  let allDeals: Deal[] = []
   try {
-    await writePriceHistory(nextPriceHistory)
-    const intelligenceStats = priceHistoryStats(nextPriceHistory)
-    sourceStatus.push(status('Deal intelligence', true, `${intelligenceStats.games} games and ${intelligenceStats.observations} price observations available.`))
-  } catch (historyError) {
-    sourceStatus.push(status('Deal intelligence', false, historyError instanceof Error ? historyError.message : 'Unable to save price intelligence.'))
+    allDeals = await withPriceHistory(async (history) => {
+      const enriched = enrichDealsWithIntelligence(baseDeals, country, history)
+      const next = recordPriceObservations(history, enriched, country, nowIso())
+      await writeJsonAtomic(priceHistoryFile, next)
+      const stats = priceHistoryStats(next)
+      sourceStatus.push(status('Deal intelligence', true, `${stats.games} games and ${stats.observations} verified country-specific observations. History shows the lowest offer observed per game, not a complete market history.`))
+      return enriched
+    })
+  } catch (error) {
+    allDeals = enrichDealsWithIntelligence(baseDeals, country, await readPriceHistory())
+    sourceStatus.push(status('Deal intelligence', false, error instanceof Error ? error.message : 'Unable to save price intelligence.'))
   }
-
+  allDeals = allDeals.sort((a, b) => (b.intelligence?.score ?? b.signalScore) - (a.intelligence?.score ?? a.signalScore) || b.signalScore - a.signalScore).slice(0, limit)
   const marketScouts = buildMarketScouts(allDeals, search)
-  sourceStatus.push(status('Marketplace scouts', true, `${marketScouts.length} marketplace comparison routes prepared across ${marketplaceTemplates.length} services.`))
-
-  const directLinks = allDeals.filter((deal) => !deal.tags.includes('store-search-link')).length
-  sourceStatus.push(status('Destination links', true, `${directLinks} direct product links and ${allDeals.length - directLinks} clean retailer searches prepared.`))
-
+  sourceStatus.push(status('Marketplace scouts', true, `${marketScouts.length} comparison search links. Marketplace prices are not verified.`))
+  const providerLinks = allDeals.filter((deal) => deal.tags.includes('provider-redirect')).length
+  sourceStatus.push(status('Destination links', true, `${providerLinks} required CheapShark redirects; remaining offers use store product links.`))
   const response: RadarResponse = {
-    updatedAt: nowIso(),
-    refreshSeconds: REFRESH_SECONDS,
-    country,
-    locale,
-    deals: allDeals,
-    stores,
-    regionalScans,
-    marketScouts,
-    metrics: metricsFor(allDeals, regionalScans),
-    sourceStatus,
+    updatedAt: nowIso(), refreshSeconds: REFRESH_SECONDS, country, locale, deals: allDeals, stores,
+    regionalScans, marketScouts, metrics: metricsFor(allDeals, regionalScans, country), sourceStatus,
   }
+  const providerResults = [cheapResult, epicResult, steamResult, gogResult]
+  if (!search && providerResults.every((result) => result.status === 'fulfilled' && !result.value.stale)) {
+    const record = historyWriteQueue.then(() => recordHistory(response))
+    historyWriteQueue = record.catch(() => undefined)
+    try { await record } catch (error) { sourceStatus.push(status('Radar history', false, error instanceof Error ? error.message : 'Unable to save radar history.')) }
+  }
+  return response
+}
 
-  await recordHistory(response)
+app.get('/api/radar', async (req, res) => {
+  const parsed = querySchema.safeParse(req.query)
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return }
+  try { res.json(await loadRadar(parsed.data)) }
+  catch (error) { res.status(502).json({ error: error instanceof Error ? error.message : 'Unable to load radar.' }) }
+})
+
+app.get('/api/game-history', async (req, res) => {
+  const parsed = z.object({ gameKey: z.string().min(1).max(200).regex(/^[a-z0-9-]+$/), country: z.string().regex(/^[a-zA-Z]{2}$/).default('US').transform((value) => value.toUpperCase()) }).safeParse(req.query)
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return }
+  await priceHistoryWriteQueue
+  const { gameKey, country } = parsed.data
+  const entry = (await readPriceHistory()).games[`${country}:${gameKey}`]
+  const response: GameHistoryResponse = {
+    gameKey, country,
+    points: (entry?.observations ?? []).flatMap<GameHistoryResponse['points'][number]>((point) => point.free
+      ? [{ at: point.at, priceUsd: 0, source: point.freeStore ?? 'Observed giveaway', free: true }]
+      : point.bestPaidUsd !== undefined ? [{ at: point.at, priceUsd: point.bestPaidUsd, source: point.bestStore ?? 'Observed minimum', free: false }] : []),
+  }
   res.json(response)
 })
+
+const libraryService = registerLibraryRoutes(app, { dataDir, queryRadar: loadRadar })
 
 let staticFilesConfigured = false
 
@@ -1225,10 +1310,10 @@ export function startRadarServer(options: StartRadarServerOptions = {}) {
   const host = options.host ?? '127.0.0.1'
   configureStaticFiles(options.staticDir)
 
-  return new Promise<{ server: ReturnType<typeof app.listen>; port: number; host: string }>((resolve, reject) => {
+  return new Promise<{ server: ReturnType<typeof app.listen>; port: number; host: string; libraryService: typeof libraryService }>((resolve, reject) => {
     const server = app.listen(port, host, () => {
       const address = server.address() as AddressInfo | null
-      resolve({ server, port: address?.port ?? port, host })
+      resolve({ server, port: address?.port ?? port, host, libraryService })
     })
     server.on('error', reject)
   })

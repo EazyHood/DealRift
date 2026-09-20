@@ -21,7 +21,7 @@ Fuente externa
 1. Escribe el caso de uso en una frase y define que dato necesita el usuario para actuar.
 2. Decide si el cambio pertenece a `server/`, `src/`, `electron/` o a mas de una capa.
 3. Si agregas una fuente, crea un adaptador que produzca objetos `Deal`; no mezcles el formato externo con la interfaz.
-4. Marca cada destino como enlace directo o busqueda de tienda. Nunca presentes una busqueda como URL exacta de producto.
+4. Marca cada destino como producto, búsqueda o redirect obligatorio del proveedor. CheapShark exige su redirect documentado; se valida estrictamente su host y dealID. Nunca presentes una búsqueda como URL exacta de producto.
 5. Deduplica por tienda y juego, normaliza moneda a USD y calcula veredicto, confianza, historial y posicion de mercado antes de responder desde la API.
 6. Muestra lo esencial en la lista; coloca notas, fechas y metadatos dentro de detalles desplegables o vistas secundarias.
 7. Agrega textos en espanol e ingles al mismo tiempo.
@@ -38,18 +38,23 @@ Antes de habilitarla:
 - Comprueba limites de uso, atribucion y condiciones de la API.
 - Usa tiempo limite, reintento y cache.
 - Conserva los datos cacheados si la fuente cae temporalmente.
-- Rechaza URLs que no sean `https` o que apunten a intermediarios conocidos.
+- Rechaza URLs que no sean `https` o destinos fuera de la lista permitida. Conserva únicamente el redirect obligatorio de CheapShark validado por `storeLinks.ts`.
 - Anade una fila a `sourceStatus` con cantidad cargada y motivo de fallo.
 
 ## Prioridades siguientes
 
-1. Ampliar las pruebas automatizadas a normalizacion completa de adaptadores, deduplicacion y estados de red degradada.
-2. Migrar el historial JSON por juego a SQLite cuando se necesiten tendencias extensas de 7/30/90 dias.
-3. Comparador de un mismo juego entre tiendas, ediciones y regiones.
-4. Servicio de alertas en segundo plano aun con la ventana cerrada, con horario silencioso.
-5. Validacion periodica de enlaces y retirada automatica de promociones vencidas.
-6. Fuentes oficiales adicionales con API o feed permitido.
-7. Firma del ejecutable, instalador opcional y actualizaciones automaticas.
+1. Obtener un certificado de firma y diseñar actualizaciones verificadas antes de distribuir un actualizador automático. La beta portable sigue sin firma.
+2. Ampliar adaptadores oficiales donde sus condiciones permitan este uso. Steam sigue siendo una muestra y una búsqueda acotada; no prometer cobertura completa.
+3. Añadir metadatos verificables de DLC y contenido para mejorar el comparador manual de ediciones. No deducir equivalencia a partir del nombre.
+4. Sincronización opcional de bibliotecas con consentimiento y credenciales seguras. La importación actual es manual mediante CSV/JSON, sin pedir contraseñas.
+5. Evaluar SQLite cuando el historial observado requiera más volumen. Hoy las escrituras JSON se serializan y se sustituyen de forma atómica.
+6. Ampliar el plan de compra más allá de prioridad/precio cuando haya evidencia de utilidad; el algoritmo actual no garantiza la combinación óptima.
+
+## Funciones personales disponibles
+
+`server/library.ts` conserva biblioteca, objetivos, preferencias y registro de avisos. `personalLibrary.ts` serializa acciones de la interfaz y adopta únicamente revisiones nuevas. La app Electron consulta favoritos cada cinco minutos y mantiene la bandeja sólo si el usuario activa segundo plano. Se consultan como máximo veinte juegos por pasada, con rotación y concurrencia de tres.
+
+Las alertas, el plan y los mínimos históricos excluyen precios caducados, futuros, de otro país o sin verificar. Las búsquedas individuales guardan observaciones por juego sin sustituir el resumen general del radar. Véase [la guía de biblioteca](LIBRARY_GUIDE.md).
 
 ## Definicion de terminado
 

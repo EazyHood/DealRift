@@ -1,0 +1,153 @@
+/* Shared personal-space surfaces follow the existing DealRift palette. */
+.personal-panel, .personal-dialog {
+  --personal-surface: #091218;
+  --personal-raised: #101d25;
+  --personal-border: #293b44;
+  --personal-gap: 16px;
+  color: var(--text);
+  color-scheme: dark;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.personal-panel { padding: 24px; background: var(--personal-surface); border: 1px solid var(--personal-border); border-radius: 12px; }
+.personal-panel h2, .personal-dialog h2 { margin: 0; font-size: 25px; line-height: 1.25; letter-spacing: -.025em; overflow-wrap: anywhere; }
+.personal-panel h3, .personal-dialog h3 { margin: 0 0 8px; font-size: 18px; line-height: 1.35; }
+.personal-panel h4, .personal-dialog h4 { margin: 0 0 8px; font-size: 15px; }
+.personal-panel p, .personal-dialog p { margin: 8px 0; }
+.personal-panel button, .personal-dialog button, .personal-button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 42px; padding: 9px 13px; border: 1px solid var(--personal-border); border-radius: 6px;
+  background: var(--personal-raised); color: var(--text); font: inherit; font-weight: 600; line-height: 1.3;
+  text-decoration: none; cursor: pointer;
+}
+.personal-panel button:hover:not(:disabled), .personal-dialog button:hover:not(:disabled), .personal-button:hover { border-color: var(--cyan); }
+.personal-panel button:disabled, .personal-dialog button:disabled { opacity: .5; cursor: not-allowed; }
+.personal-panel .personal-primary, .personal-dialog .personal-primary { background: var(--cyan); border-color: var(--cyan); color: #031511; }
+.personal-panel .personal-danger, .personal-dialog .personal-danger { color: #ff9eb3; border-color: #833f52; }
+.personal-panel button[aria-pressed="true"], .personal-panel button[aria-current="page"] { color: var(--cyan); border-color: var(--cyan); background: #102923; }
+.personal-panel :is(button,a,input,select,textarea,summary):focus-visible, .personal-dialog :is(button,a,input,select,textarea,summary):focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
+.personal-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
+.personal-heading > div { min-width: 0; }
+.personal-heading > button { flex-shrink: 0; }
+.personal-heading > div > p:not(.personal-eyebrow), .personal-muted { color: var(--muted); }
+.personal-eyebrow { color: var(--cyan); font-size: 11px; letter-spacing: .09em; text-transform: uppercase; font-weight: 700; }
+.personal-actions, .personal-badges { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.personal-tabs { display: flex; gap: 8px; margin: 20px 0 0; padding: 0 0 12px; border-bottom: 1px solid var(--personal-border); overflow-x: auto; }
+.personal-tabs button { white-space: nowrap; flex-shrink: 0; }
+.personal-status { min-height: 21px; color: var(--green); font-size: 13px; }
+.personal-status:empty { min-height: 0; }
+.personal-section { margin-top: 20px; padding: 20px; background: var(--personal-surface); border: 1px solid var(--personal-border); border-radius: 8px; }
+.personal-section .personal-section { padding: 0; border: 0; }
+.personal-fine-print { color: var(--muted); font-size: 12px; line-height: 1.65; }
+.personal-library-toolbar, .personal-form-row { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; }
+.personal-library-toolbar { justify-content: space-between; margin-top: 20px; }
+.personal-search { flex: 1 1 240px; max-width: 430px; }
+.personal-panel label:not(.personal-setting,.edition-option), .personal-dialog label { display: flex; flex-direction: column; gap: 6px; font-weight: 500; }
+.personal-form-row > label { flex: 1 1 150px; min-width: 0; }
+.personal-panel :is(input:not([type="checkbox"]),select,textarea), .personal-dialog :is(input,select,textarea) { width: 100%; min-height: 42px; padding: 9px 11px; border: 1px solid var(--personal-border); border-radius: 6px; background: #070e14; color: var(--text); font: inherit; }
+.personal-panel input[type="checkbox"] { width: 18px; height: 18px; flex: 0 0 18px; margin: 2px 0 0; accent-color: var(--cyan); }
+.personal-panel textarea { resize: vertical; }
+.personal-panel .personal-hidden { display: none; }
+.personal-field { margin: 14px 0; }
+.personal-filter-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 18px 0; }
+.personal-filter-row > span { margin-left: auto; }
+.library-game-list { display: grid; gap: 12px; }
+.library-game { padding: 20px; background: var(--personal-surface); border: 1px solid var(--personal-border); border-radius: 8px; }
+.library-game.is-owned { border-left: 3px solid var(--green); }
+.library-game-main { display: flex; justify-content: space-between; gap: 20px; }
+.library-game-copy { min-width: 0; }
+.library-game-copy h3 { margin-top: 8px; overflow-wrap: anywhere; }
+.library-game-copy small { display: block; color: var(--muted); margin-top: 3px; font-size: 12px; }
+.library-game-actions { display: flex; align-content: start; align-items: start; justify-content: flex-end; flex-wrap: wrap; gap: 8px; max-width: 370px; }
+.library-game-actions button { min-width: 110px; }
+.library-target { color: var(--cyan); }
+.library-notes { white-space: pre-wrap; overflow-wrap: anywhere; }
+.library-editor { padding-top: 18px; margin-top: 18px; border-top: 1px solid var(--personal-border); }
+.personal-badge { display: inline-block; padding: 3px 7px; background: var(--personal-raised); border: 1px solid var(--personal-border); border-radius: 4px; font-size: 11px; font-weight: 600; }
+.personal-badge.positive { color: var(--green); }
+.personal-notice { margin: 16px 0; padding: 14px 16px; background: #222013; border: 1px solid #63532f; border-radius: 6px; color: #f2dcab; }
+.personal-notice.error { background: #27131c; border-color: #833f52; color: #ffb8c8; }
+.personal-error { color: #ffb8c8; font-size: 13px; }
+.personal-price-warnings { color: var(--amber); font-size: 12px; line-height: 1.55; }
+ul.personal-price-warnings { padding-left: 18px; margin: 8px 0; }
+.personal-empty { padding: 38px 20px; text-align: center; border: 1px dashed var(--personal-border); border-radius: 8px; color: var(--muted); }
+.personal-empty h3, .personal-empty h4 { color: var(--text); margin-top: 8px; }
+.personal-empty > svg { color: var(--cyan); }
+.personal-empty p { max-width: 620px; margin: 8px auto 16px; }
+.personal-import-help { margin-top: 12px; color: var(--muted); font-size: 12px; }
+.personal-panel summary, .personal-dialog summary { min-height: 42px; padding: 10px 0; cursor: pointer; color: var(--text); }
+.personal-import-help code { display: block; overflow-x: auto; padding: 12px; color: var(--text); background: var(--personal-surface); }
+.personal-import-preview { margin-top: 16px; border: 1px solid var(--cyan); border-radius: 8px; padding: 20px; background: var(--personal-surface); }
+.personal-import-preview details ul { max-height: 230px; overflow: auto; padding-left: 24px; }
+.personal-setting { display: flex; align-items: flex-start; gap: 12px; padding: 12px 0; min-height: 44px; cursor: pointer; }
+.personal-setting > span { display: block; min-width: 0; }
+.personal-setting small { display: block; margin-top: 5px; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.personal-setting.personal-notice { padding: 14px; }
+.personal-settings { padding: 12px 0; border: 0; border-bottom: 1px solid var(--personal-border); margin: 16px 0; }
+.personal-settings legend { color: var(--cyan); font-weight: 600; }
+.personal-facts { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; margin: 20px 0; }
+.personal-facts > div { padding: 14px; background: var(--personal-raised); border-radius: 6px; }
+.personal-facts span { display: block; color: var(--muted); font-size: 12px; }
+.personal-facts strong { display: block; margin-top: 6px; font-size: 18px; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.plan-list, .personal-alert-list { list-style: none; padding: 0; margin: 20px 0; }
+.plan-list li, .personal-alert-list li { display: flex; align-items: center; gap: 16px; padding: 15px 0; border-bottom: 1px solid var(--personal-border); }
+.plan-list li > div, .personal-alert-list li > div { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.plan-list small, .personal-alert-list small { display: block; color: var(--muted); font-size: 12px; }
+.personal-alert-list .unread { border-left: 2px solid var(--cyan); padding-left: 12px; }
+.personal-alert-list .personal-badge { margin-left: 8px; }
+.personal-alert-list p { font-size: 13px; }
+.personal-evidence { padding-left: 20px; line-height: 1.7; }
+.personal-evidence li { margin-bottom: 8px; overflow-wrap: anywhere; }
+.edition-candidates { margin-top: 20px; max-height: 290px; overflow: auto; border: 1px solid var(--personal-border); border-radius: 6px; }
+.edition-option { display: flex; align-items: flex-start; gap: 12px; padding: 12px; min-height: 48px; border-bottom: 1px solid var(--personal-border); cursor: pointer; }
+.edition-option:last-child { border: 0; }
+.edition-option strong, .edition-option small { display: block; }
+.edition-option small { color: var(--muted); font-size: 12px; margin-top: 3px; }
+.edition-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(220px,1fr)); gap: 12px; }
+.edition-card { padding: 16px; border: 1px solid var(--personal-border); border-radius: 8px; background: var(--personal-raised); }
+.edition-card > strong { color: var(--cyan); font-size: 21px; }
+.edition-card h4 { min-height: 44px; overflow-wrap: anywhere; }
+.edition-card dl { margin: 20px 0; }
+.edition-card dt { color: var(--muted); font-size: 12px; margin-top: 12px; }
+.edition-card dd { margin: 3px 0; overflow-wrap: anywhere; }
+.personal-dialog { width: min(980px,calc(100% - 32px)); max-height: calc(100dvh - 32px); padding: 24px; background: var(--personal-surface); border: 1px solid var(--personal-border); border-radius: 12px; overflow-y: auto; box-shadow: 0 20px 90px #000a; }
+.personal-dialog::backdrop { background: #000b; backdrop-filter: blur(4px); }
+.personal-dialog .personal-icon { flex: 0 0 42px; padding: 9px; }
+.detail-overview { display: flex; align-items: center; gap: 22px; margin: 24px 0; }
+.detail-cover { width: 220px; max-height: 130px; object-fit: cover; border-radius: 6px; }
+.detail-price { display: block; color: var(--cyan); font-size: 30px; font-variant-numeric: tabular-nums; }
+.detail-chart { width: 100%; min-width: 0; }
+.personal-table-scroll { overflow: auto; max-width: 100%; }
+.personal-panel table, .personal-dialog table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
+.personal-panel th, .personal-dialog th { color: var(--muted); font-weight: 500; text-align: left; }
+.personal-panel :is(th,td), .personal-dialog :is(th,td) { padding: 12px 10px; border-bottom: 1px solid var(--personal-border); }
+.personal-dialog td small { display: block; color: var(--muted); font-size: 11px; }
+.personal-dialog td a { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; color: var(--cyan); }
+.personal-skeleton { min-height: 200px; display: grid; place-items: center; background: var(--personal-raised); color: var(--muted); border-radius: 6px; }
+@media (max-width: 820px) {
+  .personal-panel { padding: 18px; }
+  .personal-heading, .library-game-main { flex-direction: column; gap: 14px; }
+  .personal-heading > button { align-self: flex-start; }
+  .personal-dialog > .personal-heading { flex-direction: row; }
+  .library-game-actions { max-width: none; justify-content: flex-start; }
+  .personal-search { max-width: none; }
+  .personal-section { padding: 16px; }
+  .personal-facts { grid-template-columns: 1fr; }
+  .personal-facts > div { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  .personal-facts strong { margin: 0; font-size: 16px; }
+}
+@media (max-width: 560px) {
+  .personal-panel { padding: 14px; }
+  .personal-panel h2, .personal-dialog h2 { font-size: 22px; }
+  .personal-form-row > label { flex-basis: 100%; }
+  .personal-library-toolbar .personal-actions { width: 100%; }
+  .personal-library-toolbar .personal-actions button { flex: 1 1 130px; }
+  .library-game { padding: 14px; }
+  .library-game-actions button { flex: 1 1 125px; }
+  .personal-dialog { padding: 16px; width: calc(100% - 16px); max-height: calc(100dvh - 16px); }
+  .detail-overview { flex-direction: column; align-items: stretch; }
+  .detail-cover { width: 100%; max-height: 160px; }
+  .plan-list li, .personal-alert-list li { flex-wrap: wrap; }
+  .plan-list li > div, .personal-alert-list li > div { flex-basis: 100%; }
+  .edition-grid { grid-template-columns: 1fr; }
+}

@@ -1,7 +1,7 @@
 {
   "name": "game-deal-radar",
   "private": true,
-  "version": "1.1.1-beta.1",
+  "version": "1.2.0-beta.1",
   "description": "DealRift desktop radar for game deals, giveaways, and regional prices.",
   "author": "EazyHood",
   "license": "MIT",
@@ -26,11 +26,12 @@
     "build": "tsc -b && vite build && npm run build:server",
     "build:server": "esbuild server/index.ts --bundle --platform=node --format=cjs --target=node20 --outfile=dist-server/index.cjs",
     "electron:dev": "npm run build && electron .",
-    "dist:win": "npm run build && electron-builder --win portable --x64",
+    "dist:win": "npm run build && electron-builder --win portable --x64 --publish never",
     "lint": "oxlint",
-    "test": "tsx --test server/intelligence.test.ts server/security.test.ts server/storeLinks.test.ts server/persistence.test.ts server/apiSecurity.test.ts electron/security.test.cjs",
+    "test": "tsx --test server/*.test.ts src/lib/*.test.ts electron/*.test.cjs",
     "check": "npm run lint && npm test && npm run build",
-    "preview": "npm run build && tsx server/preview.ts"
+    "preview": "npm run build && tsx server/preview.ts",
+    "package:win": "electron-builder --win portable --x64 --publish never"
   },
   "build": {
     "appId": "com.dealrift.radar",

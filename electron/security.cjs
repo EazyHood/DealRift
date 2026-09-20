@@ -34,6 +34,12 @@ function hasTrustedHost(hostname) {
 function isTrustedExternalUrl(value) {
   try {
     const url = new URL(value)
+    if (url.hostname === 'www.cheapshark.com') {
+      const ids = url.searchParams.getAll('dealID')
+      return url.protocol === 'https:' && !url.username && !url.password && !url.port && !url.hash &&
+        url.pathname === '/redirect' && [...url.searchParams.keys()].length === 1 && ids.length === 1 &&
+        /^[A-Za-z0-9+/=_-]{1,256}$/.test(ids[0])
+    }
     return url.protocol === 'https:' && !url.username && !url.password && hasTrustedHost(url.hostname)
   } catch {
     return false

@@ -40,5 +40,8 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Audit production dependencies
-        run: npm audit --omit=dev --audit-level=high
+      - name: Audit all dependencies
+        run: npm audit --audit-level=high
+
+      - name: Package Windows application
+        run: npm run package:win
