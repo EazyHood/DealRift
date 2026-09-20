@@ -1,7 +1,10 @@
-import type { Deal } from './dealTypes.js'
+import type { Deal, GameEcosystem } from './dealTypes.js'
+import { gameIdentity } from './gameIdentity.js'
 
 export interface PriceTarget { amount: number; currency: string }
 export interface LibraryGame {
+  ecosystem?: GameEcosystem
+  storeProductId?: string
   id: string
   title: string
   steamAppId?: string
@@ -47,5 +50,5 @@ export interface GameHistoryResponse { gameKey: string; country: string; points:
 
 export function libraryGameId(deal: Deal): string {
   // Keep editions distinct even when providers share a base Steam app ID.
-  return deal.intelligence?.gameKey ?? deal.title.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+  return gameIdentity(deal)
 }

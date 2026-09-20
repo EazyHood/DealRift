@@ -2144,3 +2144,12 @@ button:disabled {
     flex-basis: auto;
   }
 }
+
+.platform-band { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin: 18px 0 12px; }
+.platform-switch { display: flex; gap: 4px; padding: 4px; border: 1px solid var(--line); border-radius: 12px; background: #0c151d; }
+.platform-switch button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid transparent; border-radius: 8px; padding: 11px 18px; color: #a6b8c5; background: transparent; font: inherit; font-weight: 650; cursor: pointer; }
+.platform-switch button[aria-pressed="true"] { color: #12f7d6; border-color: #12f7d655; background: #12f7d610; }
+.platform-switch button:focus-visible { outline: 2px solid #12f7d6; outline-offset: 3px; }
+.platform-caption, .console-coverage-note { color: #9cb1bf; font-size: 12px; line-height: 1.6; }
+.console-coverage-note { margin: 10px 2px 16px; max-width: 980px; }
+@media (max-width: 600px) { .platform-switch { width: 100%; } .platform-switch button { flex: 1; padding: 10px 8px; } .platform-caption { width: 100%; } }

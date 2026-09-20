@@ -39,3 +39,14 @@ El comparador permite seleccionar ediciones y consultar ofertas, fechas, país y
 El plan de compra toma favoritos no poseídos con ofertas verificadas, ordena por prioridad y después por precio, y respeta el presupuesto en la moneda elegida. Explica las exclusiones y no garantiza la combinación matemática óptima. No compra ni modifica cuentas de tiendas.
 
 En **Preferencias**, el modo de bajo consumo desactiva el fondo animado y puedes ocultar juegos poseídos. El menú de actualizaciones abre las releases oficiales; todavía no hay actualización automática ni firma digital del ejecutable.
+
+
+## Consoles
+
+Select PC, PlayStation or Xbox in the radar, then watch an offer to save its exact platform and store product ID. The library shows the platform and console compatibility; the same title on another platform remains a separate license. All watched platforms are checked even when the radar displays only one.
+
+Manual entries and CSV/JSON imports accept `ecosystem` (`pc`, `playstation`, `xbox`) and optional `storeProductId`. Old files without an ecosystem stay PC entries. For consoles, copy the product ID from an official store product URL to monitor an exact edition; `product:ID` also works in radar search. A manual title without an ID must match the full title within that ecosystem.
+
+Use native price targets (for example COP for a Colombian Xbox price) or USD where a current conversion is available. PlayStation Colombia often quotes USD. The price and alert history remains separate by platform, official product and country. Console ownership does not imply ownership on PC or another console store.
+
+Edition comparisons stay within the selected ecosystem. The purchase planner may include multiple platforms, but never substitutes a cheaper PC license for a watched Xbox or PlayStation product. Review the displayed console compatibility before purchasing.

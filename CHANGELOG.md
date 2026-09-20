@@ -4,6 +4,21 @@ All notable changes to DealRift are documented here. The project follows Semanti
 
 ## [Unreleased]
 
+## [1.3.0-beta.1] - 2026-09-20
+
+### Added
+
+- PlayStation Store PS4/PS5 and Microsoft Xbox catalog adapters with country prices, title search and exact product lookup.
+- PC/PlayStation/Xbox navigation, console compatibility filter and shared offer filters.
+- Console favorites, price targets, notifications, local history, imports, backups and purchase planning.
+- Store rating metadata, bounded discovery, source coverage messages and regression tests for subscription exclusions and console identity.
+
+### Fixed
+
+- Identical titles on different platforms no longer share library identity, price history or market comparisons.
+- Dashboard history is separated by platform and country; legacy PC data remains readable.
+- Console store URLs are accepted only on explicit official hosts in the API, backup parser and desktop shell.
+
 ## [1.2.0-beta.1] - 2026-09-20
 
 ### Added

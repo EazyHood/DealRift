@@ -1,3 +1,4 @@
+import { gameIdentity } from '../src/shared/gameIdentity.js'
 import type {
   Deal,
   DealIntelligence,
@@ -68,8 +69,8 @@ export function canonicalGameKey(title: string) {
     .replace(/\s+/g, '-')
 }
 
-export function priceHistoryKey(country: string, title: string) {
-  return `${country.toUpperCase()}:${canonicalGameKey(title)}`
+export function priceHistoryKey(country: string, game: string | Deal) {
+  return `${country.toUpperCase()}:${typeof game === 'string' ? canonicalGameKey(game) : gameIdentity(game)}`
 }
 
 export function parsePriceHistory(value: unknown): DealPriceHistoryDatabase {
@@ -161,7 +162,7 @@ function buildIntelligence(
   score += discountImpact
   if (deal.savingsPercent >= 75) addReason(reasons, 'deep-discount', round(discountImpact), `${Math.round(deal.savingsPercent)}%`)
 
-  const rating = deal.steamRatingPercent ?? deal.metacriticScore ?? 0
+  const rating = deal.storeRatingPercent ?? deal.steamRatingPercent ?? deal.metacriticScore ?? 0
   if (rating >= 80) {
     const impact = Math.min(9, (rating - 70) * 0.3)
     score += impact
@@ -240,7 +241,7 @@ function buildIntelligence(
   const sortedReasons = current ? reasons.sort((a, b) => Math.abs(b.impact) - Math.abs(a.impact)).slice(0, 6) : []
 
   return {
-    gameKey: canonicalGameKey(deal.title),
+    gameKey: gameIdentity(deal),
     score: normalizedScore,
     verdict: verdictFor(normalizedScore, deal.riskLevel, priceAnomaly, confidenceScore),
     confidenceScore,
@@ -280,17 +281,17 @@ export function enrichDealsWithIntelligence(
   const groups = new Map<string, Deal[]>()
   for (const deal of deals) {
     if (!isCurrentVerifiedDeal(deal, country, now)) continue
-    const key = canonicalGameKey(deal.title)
+    const key = gameIdentity(deal)
     const group = groups.get(key) ?? []
     group.push(deal)
     groups.set(key, group)
   }
 
   return deals.map((deal) => {
-    const gameKey = canonicalGameKey(deal.title)
+    const gameKey = gameIdentity(deal)
     return {
       ...deal,
-      intelligence: buildIntelligence(deal, groups.get(gameKey) ?? [], database.games[priceHistoryKey(country, deal.title)], now, isCurrentVerifiedDeal(deal, country, now)),
+      intelligence: buildIntelligence(deal, groups.get(gameKey) ?? [], database.games[priceHistoryKey(country, deal)], now, isCurrentVerifiedDeal(deal, country, now)),
     }
   })
 }
@@ -310,7 +311,7 @@ export function recordPriceObservations(
   const groups = new Map<string, Deal[]>()
   for (const deal of deals) {
     if (!isCurrentVerifiedDeal(deal, country, Date.parse(at))) continue
-    const key = priceHistoryKey(country, deal.title)
+    const key = priceHistoryKey(country, deal)
     const group = groups.get(key) ?? []
     group.push(deal)
     groups.set(key, group)

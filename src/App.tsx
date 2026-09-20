@@ -1,3 +1,4 @@
+import { getGameEcosystem, libraryMatchesDeal } from './shared/gameIdentity'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import {
@@ -60,6 +61,7 @@ import { fetchHistory, fetchRadar, fetchRegionalScan, type RadarParams } from '.
 import type {
   Deal,
   DealHistoryPoint,
+  GameEcosystem,
   IntelligenceReasonCode,
   Language,
   RadarResponse,
@@ -159,7 +161,7 @@ function formatUsd(value: number | undefined) {
 }
 
 function frontendGameKey(deal: Deal) {
-  return deal.intelligence?.gameKey ?? deal.title.toLowerCase().replace(/[^a-z0-9]+/g, '-')
+  return libraryGameId(deal)
 }
 
 function formatPercent(value: number) {
@@ -280,7 +282,7 @@ function dealUsd(deal: Deal) {
 }
 
 function dealRating(deal: Deal) {
-  return deal.steamRatingPercent ?? deal.metacriticScore ?? 0
+  return deal.storeRatingPercent ?? deal.steamRatingPercent ?? deal.metacriticScore ?? 0
 }
 
 function regionalStrength(deal: Deal) {
@@ -325,6 +327,8 @@ function useRadarData(params: RadarParams, autoRefresh: boolean) {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [tick, setTick] = useState(0)
+  const requestKey = JSON.stringify(params)
+  const [loadedKey, setLoadedKey] = useState('')
 
   const refresh = useCallback(() => setTick((value) => value + 1), [])
 
@@ -333,6 +337,8 @@ function useRadarData(params: RadarParams, autoRefresh: boolean) {
     setLoading(true)
     fetchRadar(params, controller.signal)
       .then((response) => {
+        if (controller.signal.aborted) return
+        setLoadedKey(requestKey)
         setData(response)
         setError(null)
       })
@@ -346,7 +352,7 @@ function useRadarData(params: RadarParams, autoRefresh: boolean) {
       })
 
     return () => controller.abort()
-  }, [params, tick])
+  }, [params, tick, requestKey])
 
   useEffect(() => {
     if (!autoRefresh) return
@@ -354,22 +360,22 @@ function useRadarData(params: RadarParams, autoRefresh: boolean) {
     return () => window.clearInterval(interval)
   }, [autoRefresh, data?.refreshSeconds, refresh])
 
-  return { data, error, loading, refresh }
+  return { data: loadedKey === requestKey ? data : null, error, loading, refresh }
 }
 
-function useHistoryData(refreshKey: string | undefined) {
+function useHistoryData(refreshKey: string | undefined, ecosystem: GameEcosystem, country: string) {
   const [history, setHistory] = useState<DealHistoryPoint[]>([])
 
   useEffect(() => {
     const controller = new AbortController()
-    fetchHistory(controller.signal)
+    fetchHistory(controller.signal, ecosystem, country)
       .then(setHistory)
       .catch(() => {
         if (!controller.signal.aborted) setHistory([])
       })
 
     return () => controller.abort()
-  }, [refreshKey])
+  }, [refreshKey, ecosystem, country])
 
   return history
 }
@@ -378,12 +384,14 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
   const personal = usePersonalLibrary(initialLibrary)
   const saveSettings = personal.saveSettings
   const [detailDeal, setDetailDeal] = useState<Deal | null>(null)
-  const watchlist = useMemo(() => personal.state.games.filter((game) => game.watched).map((game) => game.id), [personal.state.games])
-  const ownedIds = useMemo(() => new Set(personal.state.games.filter((game) => game.owned).map((game) => game.id)), [personal.state.games])
+  const watchlist = useMemo(() => personal.state.games.filter((game) => game.watched), [personal.state.games])
+  const ownedGames = useMemo(() => personal.state.games.filter((game) => game.owned), [personal.state.games])
   const hideOwned = personal.state.settings['dealrift-hide-owned'] === 'true'
   const [language, setLanguage] = useState<Language>(() =>
     readSetting('dealrift-language', navigator.language.toLowerCase().startsWith('es') ? 'es' : 'en') as Language,
   )
+  const [ecosystem, setEcosystem] = useState<GameEcosystem>(() => readSetting('dealrift-ecosystem', 'pc') as GameEcosystem)
+  const [device, setDevice] = useState('all')
   const [country, setCountry] = useState(() => readSetting('dealrift-country', 'US'))
   const [query, setQuery] = useState('')
   const [submittedQuery, setSubmittedQuery] = useState('')
@@ -401,7 +409,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
   const [onlyFree, setOnlyFree] = useState(() => readSetting('dealrift-only-free', 'false') === 'true')
   const [onlyRegional, setOnlyRegional] = useState(() => readSetting('dealrift-only-regional', 'false') === 'true')
   const [onlyWatched, setOnlyWatched] = useState(() => readSetting('dealrift-only-watched', 'false') === 'true')
-  const [onlyEndingSoon, setOnlyEndingSoon] = useState(() => readSetting('dealrift-only-ending-soon', 'false') === 'true')
+  const [onlyEndingSoon, setOnlyEndingSoon] = useState(() => ecosystem !== 'playstation' && readSetting('dealrift-only-ending-soon', 'false') === 'true')
   const [onlyDeepDiscount, setOnlyDeepDiscount] = useState(() => readSetting('dealrift-only-deep-discount', 'false') === 'true')
   const [onlyLowRisk, setOnlyLowRisk] = useState(() => readSetting('dealrift-only-low-risk', 'false') === 'true')
   const [onlyExceptional, setOnlyExceptional] = useState(() => readSetting('dealrift-only-exceptional', 'false') === 'true')
@@ -425,18 +433,21 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
 
   const params = useMemo<RadarParams>(
     () => ({
+      onlyFree,
+      ecosystem,
       country,
       locale,
       limit: 120,
       minSavings,
-      search: /^(steam|gog|epic|epic games store|humble|humble store|greenmangaming|fanatical|ubisoft|uplay)$/i.test(submittedQuery) ? undefined : submittedQuery || undefined,
-      regionSample: 5,
+      search: ecosystem === 'pc' && /^(steam|gog|epic|epic games store|humble|humble store|greenmangaming|fanatical|ubisoft|uplay)$/i.test(submittedQuery) ? undefined : submittedQuery || undefined,
+      regionSample: ecosystem === 'pc' ? 5 : 0,
     }),
-    [country, locale, minSavings, submittedQuery],
+    [onlyFree, ecosystem, country, locale, minSavings, submittedQuery],
   )
 
-  const { data, error, loading, refresh } = useRadarData(params, autoRefresh)
-  const history = useHistoryData(data?.updatedAt)
+  const { data: radarData, error, loading, refresh } = useRadarData(params, autoRefresh)
+  const data = radarData?.country === country && (radarData.ecosystem ?? 'pc') === ecosystem ? radarData : null
+  const history = useHistoryData(data?.updatedAt, ecosystem, country)
 
   useEffect(() => {
     const interval = window.setInterval(() => setNow(Date.now()), 30000)
@@ -459,6 +470,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
     document.documentElement.lang = language
     void saveSettings({
       'dealrift-language': String(language),
+      'dealrift-ecosystem': ecosystem,
       'dealrift-country': String(country),
       'dealrift-min-savings': String(minSavings),
       'dealrift-alert-savings': String(alertSavings),
@@ -483,6 +495,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
     alertSignal,
     compactMode,
     country,
+    ecosystem,
     language,
     maxPrice,
     minRating,
@@ -522,8 +535,9 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
     const appIdQuery = /^(?:steam:)?(\d{1,10})$/.exec(normalizedQuery)?.[1]
     const filtered = source.filter((deal) => {
       const searchOk =
-        !normalizedQuery ||
+        ecosystem !== 'pc' || !normalizedQuery ||
         (Boolean(appIdQuery) && deal.steamAppId === appIdQuery) ||
+        (normalizedQuery.startsWith('product:') && deal.storeProductId?.toLowerCase() === normalizedQuery.slice(8)) ||
         deal.title.toLowerCase().includes(normalizedQuery) ||
         deal.source.toLowerCase().includes(normalizedQuery) ||
         deal.platform.toLowerCase().includes(normalizedQuery) ||
@@ -537,13 +551,14 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
       const priceOk = maxPrice >= 100 || dealUsd(deal) <= maxPrice
       const ratingOk = minRating <= 0 || dealRating(deal) >= minRating
       const freeOk = !onlyFree || deal.isFree
-      const regionalOk = !onlyRegional || Boolean(deal.bestRegion)
-      const watchedOk = !onlyWatched || watchlist.includes(libraryGameId(deal))
+      const regionalOk = ecosystem !== 'pc' || !onlyRegional || Boolean(deal.bestRegion)
+      const watchedOk = !onlyWatched || watchlist.some((game) => libraryMatchesDeal(game, deal))
       const endingOk = !onlyEndingSoon || isEndingSoon(deal)
       const deepDiscountOk = !onlyDeepDiscount || deal.savingsPercent >= 80
       const lowRiskOk = !onlyLowRisk || deal.riskLevel === 'low'
       const exceptionalOk = !onlyExceptional || deal.intelligence?.verdict === 'exceptional'
-      return (!hideOwned || !ownedIds.has(libraryGameId(deal))) && searchOk && sourceOk && storeOk && riskOk && priceOk && ratingOk && freeOk && regionalOk && watchedOk && endingOk && deepDiscountOk && lowRiskOk && exceptionalOk
+      const deviceOk = device === 'all' || deal.platform.toLowerCase().includes(device)
+      return deviceOk && (!hideOwned || !ownedGames.some((game) => libraryMatchesDeal(game, deal))) && searchOk && sourceOk && storeOk && riskOk && priceOk && ratingOk && freeOk && regionalOk && watchedOk && endingOk && deepDiscountOk && lowRiskOk && exceptionalOk
     })
 
     return [...filtered].sort((a, b) => {
@@ -557,7 +572,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
       if (sortMode === 'signal') return intelligenceScore(b) - intelligenceScore(a) || dealUsd(a) - dealUsd(b)
       return valueScore(b) - valueScore(a) || dealUsd(a) - dealUsd(b)
     })
-  }, [data, country, now, maxPrice, minRating, onlyDeepDiscount, onlyEndingSoon, onlyExceptional, onlyFree, onlyLowRisk, onlyRegional, onlyWatched, selectedStore, showHighRisk, sortMode, sourceFilter, submittedQuery, watchlist, ownedIds, hideOwned])
+  }, [data, country, now, maxPrice, minRating, onlyDeepDiscount, onlyEndingSoon, onlyExceptional, onlyFree, onlyLowRisk, onlyRegional, onlyWatched, selectedStore, showHighRisk, sortMode, sourceFilter, submittedQuery, watchlist, ownedGames, hideOwned, device, ecosystem])
 
   const storeOptions = useMemo(() => {
     const counts = new Map<string, number>()
@@ -642,7 +657,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
 
   useEffect(() => {
     setCurrentPage(1)
-  }, [country, maxPrice, minRating, minSavings, onlyDeepDiscount, onlyEndingSoon, onlyExceptional, onlyFree, onlyLowRisk, onlyRegional, onlyWatched, pageSize, selectedStore, showHighRisk, sortMode, sourceFilter, submittedQuery])
+  }, [ecosystem, device, country, maxPrice, minRating, minSavings, onlyDeepDiscount, onlyEndingSoon, onlyExceptional, onlyFree, onlyLowRisk, onlyRegional, onlyWatched, pageSize, selectedStore, showHighRisk, sortMode, sourceFilter, submittedQuery])
 
   useEffect(() => {
     setCurrentPage((page) => Math.min(page, totalPages))
@@ -706,14 +721,14 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
     () =>
       (data?.deals ?? [])
         .filter((deal) => {
-          const watched = watchlist.includes(libraryGameId(deal))
+          const watched = watchlist.some((game) => libraryMatchesDeal(game, deal))
           const matchesRule = watched || intelligenceScore(deal) >= alertSignal || deal.savingsPercent >= alertSavings || (alertFree && deal.isFree)
           return deal.riskLevel !== 'high' && deal.confidence !== 'fallback' && !deal.freshness?.stale &&
             deal.availability !== 'upcoming' && deal.availability !== 'expired' &&
             (!deal.startsAt || Date.parse(deal.startsAt) <= now) && (!deal.expiresAt || Date.parse(deal.expiresAt) > now) &&
             (!deal.priceCountry || deal.priceCountry === country) && matchesRule
         })
-        .sort((a, b) => Number(watchlist.includes(libraryGameId(b))) - Number(watchlist.includes(libraryGameId(a))) || intelligenceScore(b) - intelligenceScore(a))
+        .sort((a, b) => Number(watchlist.some((game) => libraryMatchesDeal(game, b))) - Number(watchlist.some((game) => libraryMatchesDeal(game, a))) || intelligenceScore(b) - intelligenceScore(a))
         .slice(0, 8),
     [alertFree, alertSavings, alertSignal, data, watchlist, country, now],
   )
@@ -763,14 +778,15 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
 
   const toggleWatch = (deal: Deal) => {
     const id = libraryGameId(deal)
-    const existing = personal.state.games.find((game) => game.id === id)
+    const existing = personal.state.games.find((game) => libraryMatchesDeal(game, deal))
     void personal.action({ action: 'upsert', game: {
-      id, title: deal.title, steamAppId: deal.steamAppId, owned: false, priority: 2, notes: '',
+      id, title: deal.title, steamAppId: deal.steamAppId, ecosystem: getGameEcosystem(deal), storeProductId: deal.storeProductId, owned: false, priority: 2, notes: '',
       ...existing, watched: !existing?.watched, snapshot: deal, updatedAt: new Date().toISOString(),
     } }).catch(() => {})
   }
 
   const resetOfferFilters = () => {
+    setDevice('all')
     setQuery('')
     setSubmittedQuery('')
     setMinSavings(35)
@@ -790,6 +806,15 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
     setCompactMode(false)
     setShowAdvancedFilters(false)
     setCurrentPage(1)
+  }
+
+  const switchEcosystem = (next: GameEcosystem) => {
+    if (next !== ecosystem && (/^(product:|steam:)/i.test(submittedQuery) || /^\d+$/.test(submittedQuery))) { setQuery(''); setSubmittedQuery('') }
+    setEcosystem(next); setDevice('all'); setSourceFilter('all'); setSelectedStore('all'); setOnlyRegional(false)
+    setManualScan(null); setSelectedScanId(''); setDetailDeal(null); setCurrentPage(1)
+    if (next === 'playstation') setOnlyEndingSoon(false)
+    if (sortMode === 'regional') setSortMode('value')
+    if (activeView === 'regions') setActiveView('deals')
   }
 
   const dataIsStale = Boolean(
@@ -850,6 +875,13 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
         </div>
       </header>
 
+      <section className="platform-band" aria-label={language === 'es' ? 'Plataforma de juegos' : 'Gaming platform'}>
+        <div className="platform-switch" role="group" aria-label={language === 'es' ? 'Elegir plataforma' : 'Choose platform'}>
+          {(['pc', 'playstation', 'xbox'] as const).map((platform) => <button key={platform} type="button" aria-pressed={ecosystem === platform} onClick={() => switchEcosystem(platform)}><Gamepad2 size={17} />{platform === 'pc' ? 'PC' : platform === 'playstation' ? 'PlayStation' : 'Xbox'}</button>)}
+        </div>
+        {ecosystem !== 'pc' ? <label className="compact-select"><span>{language === 'es' ? 'Consola' : 'Console'}</span><select aria-label={language === 'es' ? 'Filtrar consola' : 'Filter console'} value={device} onChange={(event) => setDevice(event.target.value)}><option value="all">{t('all')}</option>{(ecosystem === 'playstation' ? [['ps5', 'PS5'], ['ps4', 'PS4']] : [['series', 'Xbox Series X|S'], ['xbox one', 'Xbox One']]).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label> : null}
+        <span className="platform-caption">{ecosystem === 'pc' ? (language === 'es' ? 'Tiendas y ofertas para ordenador' : 'PC stores and offers') : (language === 'es' ? 'Tienda oficial · Precios del país seleccionado' : 'Official store · Selected country prices')}</span>
+      </section>
       <section className="control-band">
         <form className="search-box" onSubmit={submitSearch}>
           <Search size={18} />
@@ -861,7 +893,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
               if (event.key === 'Escape' && (query || submittedQuery)) clearSearch()
             }}
             aria-label={t('search')}
-            placeholder={t('searchPlaceholder')}
+            placeholder={ecosystem === 'pc' ? t('searchPlaceholder') : (language === 'es' ? 'Busca un juego o product:ID…' : 'Search a game or product:ID…')}
           />
           {query || submittedQuery ? (
             <button type="button" className="clear-search" onClick={clearSearch} title={t('clearSearch')} aria-label={t('clearSearch')}>
@@ -890,16 +922,17 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
         </label>
       </section>
 
+      {ecosystem !== 'pc' ? <p className="console-coverage-note">{language === 'es' ? 'Catálogo y búsquedas con un número limitado de resultados. Las valoraciones solo se filtran cuando la tienda las publica; no incluyen beneficios de PS Plus o Game Pass. El comparador entre países está disponible para Steam.' : 'Catalog and searches return a limited set of results. Rating filters use published store ratings only; PS Plus or Game Pass benefits are excluded. Cross-country comparison is available for Steam.'} {ecosystem === 'playstation' ? (language === 'es' ? 'PlayStation no publica fechas de finalización en esta fuente.' : 'PlayStation does not publish end dates in this source.') : ''}</p> : null}
       <section className="metric-grid">
         <Metric icon={<Gamepad2 size={22} />} label={t('totalDeals')} value={String(filteredMetrics.total)} />
         <Metric icon={<Gift size={22} />} label={t('freeGames')} value={String(filteredMetrics.free)} tone="green" />
-        <Metric icon={<Clock3 size={22} />} label={t('upcomingGames')} value={String(filteredMetrics.upcoming)} />
+        {ecosystem === 'pc' ? <Metric icon={<Clock3 size={22} />} label={t('upcomingGames')} value={String(filteredMetrics.upcoming)} /> : null}
         <Metric icon={<TrendingDown size={22} />} label={t('maxSavings')} value={formatPercent(filteredMetrics.maxSavings)} tone="pink" />
-        <Metric icon={<MapPin size={22} />} label={t('regionFinds')} value={String(filteredMetrics.regions)} tone="amber" />
+        {ecosystem === 'pc' ? <Metric icon={<MapPin size={22} />} label={t('regionFinds')} value={String(filteredMetrics.regions)} tone="amber" /> : null}
       </section>
 
       <nav className="view-tabs" aria-label={t('sections')}>
-        {dashboardTabs.map((view) => (
+        {dashboardTabs.filter((view) => ecosystem === 'pc' || view.id !== 'regions').map((view) => (
           <button
             key={view.id}
             type="button"
@@ -926,7 +959,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
 
       {personal.error ? <div className="error-line" role="alert"><AlertTriangle size={18} /><span>{t('librarySaveFailed')} {personal.error}</span></div> : null}
       {sourcesDegraded ? <div className="source-warning" role="status"><AlertTriangle size={16} /><span>{t('partialDataNotice')}</span><button type="button" onClick={() => setActiveView('sources')}>{t('viewSources')}</button></div> : null}
-      {activeView === 'library' ? <LibraryPanel state={personal.state} language={language} country={country} deals={data?.deals ?? []}
+      {activeView === 'library' ? <LibraryPanel state={personal.state} language={language} ecosystem={ecosystem} country={country} deals={data?.deals ?? []}
         busy={personal.busy} error={personal.error} onAction={libraryAction} onCheck={personal.check} onOpenGame={setDetailDeal} /> : null}
 
       {activeView === 'deals' ? (
@@ -934,7 +967,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
           <div className="deal-toolbar">
             <section className="filter-strip">
               {showAdvancedFilters ? <div className="segmented" aria-label={t('source')}>
-                {sourceFilters.map((filter) => (
+                {sourceFilters.filter((filter) => ecosystem === 'pc' || ['all', 'official'].includes(filter)).map((filter) => (
                   <button
                     key={filter}
                     type="button"
@@ -963,7 +996,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
                 <label className="compact-select">
                   <BarChart3 size={16} />
                   <select value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)}>
-                    {sortModes.map((mode) => (
+                    {sortModes.filter((mode) => ecosystem === 'pc' || mode !== 'regional').map((mode) => (
                       <option key={mode} value={mode}>
                         {t('sort')}: {t(mode)}
                       </option>
@@ -1054,10 +1087,10 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
                   <span>{t('onlyFree')}</span>
                 </label>
 
-                <label className={`quick-toggle ${onlyRegional ? 'active' : ''}`}>
+                {ecosystem === 'pc' ? <label className={`quick-toggle ${onlyRegional ? 'active' : ''}`}>
                   <input type="checkbox" checked={onlyRegional} onChange={(event) => setOnlyRegional(event.target.checked)} />
                   <span>{t('onlyRegional')}</span>
-                </label>
+                </label> : null}
 
                 <label className={`quick-toggle ${onlyWatched ? 'active' : ''}`}>
                   <input type="checkbox" checked={onlyWatched} onChange={(event) => setOnlyWatched(event.target.checked)} />
@@ -1065,7 +1098,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
                 </label>
 
                 <label className={`quick-toggle ${onlyEndingSoon ? 'active' : ''}`}>
-                  <input type="checkbox" checked={onlyEndingSoon} onChange={(event) => setOnlyEndingSoon(event.target.checked)} />
+                  <input type="checkbox" disabled={ecosystem === 'playstation'} title={ecosystem === 'playstation' ? (language === 'es' ? 'PlayStation no publica fechas de fin en esta fuente' : 'PlayStation does not publish end dates in this source') : undefined} checked={onlyEndingSoon} onChange={(event) => setOnlyEndingSoon(event.target.checked)} />
                   <span>{t('endingSoon')}</span>
                 </label>
 
@@ -1103,7 +1136,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
                     key={deal.id}
                     deal={deal}
                     index={(currentPage - 1) * pageSize + index}
-                    isWatched={watchlist.includes(libraryGameId(deal))}
+                    isWatched={watchlist.some((game) => libraryMatchesDeal(game, deal))}
                     isScanning={scanLoadingId === deal.id}
                     alternatives={(alternativesByGame.get(frontendGameKey(deal)) ?? []).filter((alternative) => alternative.id !== deal.id).slice(0, 3)}
                     onRegionScan={scanDealRegions}
@@ -1117,7 +1150,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
                 <div className="empty-state">
                   <Search size={22} />
                   <span>{loading ? t('loading') : t('noDeals')}</span>
-                  {!loading ? <button type="button" onClick={resetOfferFilters}>{t('clearFilters')}</button> : null}
+                  {!loading ? <><button type="button" onClick={resetOfferFilters}>{t('clearFilters')}</button>{submittedQuery && minSavings > 0 ? <button type="button" onClick={() => setMinSavings(0)}>{language === 'es' ? 'Buscar también sin descuento' : 'Include full-price matches'}</button> : null}</> : null}
                 </div>
               )}
             </div>
@@ -1283,7 +1316,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
         </section>
       ) : null}
       {detailDeal ? <GameDetail deal={detailDeal} offers={data?.deals ?? []} language={language} country={country}
-        onClose={() => setDetailDeal(null)} onWatch={toggleWatch} watched={watchlist.includes(libraryGameId(detailDeal))} /> : null}
+        onClose={() => setDetailDeal(null)} onWatch={toggleWatch} watched={watchlist.some((game) => libraryMatchesDeal(game, detailDeal))} /> : null}
     </main>
     </>
   )
@@ -1503,6 +1536,7 @@ function DealRow({ deal, country, index, isWatched, isScanning, alternatives, on
           {isEndingSoon(deal) ? <span className="time-left">{t('endingSoon')}</span> : null}
           {timeLeft ? <span className="time-left"><Clock3 size={13} />{t('timeLeft')} {timeLeft}</span> : null}
           {showUsd ? <span className="usd-normalized">~${normalizedUsd.toFixed(2)} {t('usdApprox')}</span> : null}
+          {deal.storeRatingPercent !== undefined ? <span>{deal.storeRatingPercent}% · {deal.source}</span> : null}
           {deal.steamRatingPercent ? <span>{deal.steamRatingPercent}% Steam</span> : null}
         </div>
 

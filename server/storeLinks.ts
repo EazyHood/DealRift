@@ -28,6 +28,7 @@ const TRUSTED_STORE_ROOTS = Object.freeze([
 
 function hasTrustedHost(hostname: string) {
   const host = hostname.toLowerCase().replace(/\.$/, '')
+  if (['store.playstation.com', 'www.xbox.com', 'xbox.com', 'www.microsoft.com'].includes(host)) return true
   return TRUSTED_STORE_ROOTS.some((root) => host === root || host.endsWith(`.${root}`))
 }
 

@@ -1,4 +1,5 @@
 export type Language = 'es' | 'en'
+export type GameEcosystem = 'pc' | 'playstation' | 'xbox'
 
 export type SourceKind = 'official' | 'authorized' | 'marketplace' | 'freebie' | 'regional'
 
@@ -81,6 +82,9 @@ export interface DealIntelligence {
 }
 
 export interface Deal {
+  ecosystem?: GameEcosystem
+  storeProductId?: string
+  storeRatingPercent?: number
   id: string
   title: string
   source: string
@@ -170,6 +174,8 @@ export interface SourceStatus {
 }
 
 export interface DealHistoryPoint {
+  ecosystem?: GameEcosystem
+  country?: string
   updatedAt: string
   totalDeals: number
   freebies: number
@@ -180,6 +186,7 @@ export interface DealHistoryPoint {
 }
 
 export interface RadarResponse {
+  ecosystem?: GameEcosystem
   updatedAt: string
   refreshSeconds: number
   country: string

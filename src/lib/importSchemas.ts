@@ -11,6 +11,7 @@ export function safeImportedStoreUrl(value: string) {
       return url.pathname === '/redirect' && !url.hash && keys.length === 1 && keys[0] === 'dealID' && /^[A-Za-z0-9+/=_-]{1,256}$/.test(url.searchParams.get('dealID') ?? '')
     }
     const host = url.hostname.toLowerCase().replace(/\.$/, '')
+    if (['store.playstation.com', 'www.xbox.com', 'xbox.com', 'www.microsoft.com'].includes(host)) return true
     return roots.some((root) => host === root || host.endsWith(`.${root}`))
   } catch { return false }
 }
@@ -34,6 +35,7 @@ const intelligence = z.object({
   flags: z.object({ priceAnomaly: z.boolean(), expiringSoon: z.boolean(), searchDestination: z.boolean() }).strict(),
 }).strict()
 export const importedSnapshotSchema = z.object({
+  ecosystem: z.enum(['pc', 'playstation', 'xbox']).optional(), storeProductId: z.string().regex(/^[A-Za-z0-9_-]{1,100}$/).optional(), storeRatingPercent: finite.min(0).max(100).optional(),
   id: z.string().min(1).max(500), title: z.string().min(1).max(300), source: text, sourceKind: z.enum(['official', 'authorized', 'marketplace', 'freebie', 'regional']), platform: text,
   image: imageUrl, url: storeUrl, salePrice: price, normalPrice: price.optional(), savingsPercent: finite.min(0).max(100), dealScore: finite, signalScore: finite,
   metacriticScore: finite.min(0).max(100).optional(), steamRatingPercent: finite.min(0).max(100).optional(), steamRatingText: text.optional(), steamAppId: z.string().regex(/^\d{1,12}$/).optional(),
