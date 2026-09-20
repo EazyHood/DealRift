@@ -1,5 +1,6 @@
 import type { Deal } from '../shared/dealTypes'
-import { libraryGameId, type LibraryGame } from '../shared/libraryTypes'
+import type { LibraryGame } from '../shared/libraryTypes'
+import { libraryMatchesDeal } from '../shared/gameIdentity'
 
 export const MAX_OFFER_AGE_MS = 30 * 60 * 1000
 export type ExclusionReason = 'owned' | 'unwatched' | 'missing' | 'stale' | 'expired' | 'upcoming' | 'country' | 'currency' | 'risk' | 'budget'
@@ -47,9 +48,9 @@ export function buildPurchasePlan(games: LibraryGame[], deals: Deal[], budget: n
   const safeBudget = Number.isFinite(budget) && budget >= 0 ? Math.min(budget, 100_000_000) : 0
   for (const game of games) {
     if (game.owned || !game.watched) { excluded.push({ game, reason: game.owned ? 'owned' : 'unwatched' }); continue }
-    const matches = deals.filter((deal) => libraryGameId(deal) === game.id)
+    const matches = deals.filter((deal) => libraryMatchesDeal(game, deal))
     // A stored snapshot is usable only within the same freshness and eligibility checks.
-    if (game.snapshot) {
+    if (game.snapshot && libraryMatchesDeal(game, game.snapshot)) {
       const duplicate = matches.findIndex((deal) => deal.id === game.snapshot?.id)
       if (duplicate < 0) matches.push(game.snapshot)
       else if (Date.parse(game.snapshot.freshness?.updatedAt ?? game.snapshot.detectedAt) > Date.parse(matches[duplicate].freshness?.updatedAt ?? matches[duplicate].detectedAt)) matches[duplicate] = game.snapshot

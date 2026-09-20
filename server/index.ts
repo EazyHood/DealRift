@@ -17,11 +17,15 @@ import {
 } from './intelligence.js'
 import { writeJsonAtomic } from './persistence.js'
 import { registerLibraryRoutes } from './library.js'
+import { fetchPlayStationDeals } from './playstation.js'
+import { fetchXboxDeals } from './xbox.js'
+import { gameIdentity } from '../src/shared/gameIdentity.js'
 import { isAllowedCorsOrigin, SECURITY_HEADERS } from './security.js'
 import { cheapSharkDealUrl, trustedStoreUrl } from './storeLinks.js'
 import type { GameHistoryResponse } from '../src/shared/libraryTypes.js'
 import type {
   Deal,
+  GameEcosystem,
   DealHistoryPoint,
   MarketScout,
   RadarMetrics,
@@ -34,9 +38,9 @@ import type {
 } from '../src/shared/dealTypes.js'
 
 const PORT = Number(process.env.PORT ?? 5174)
-const USER_AGENT = process.env.RADAR_USER_AGENT ?? 'DealRift/1.1 (https://github.com/EazyHood/DealRift)'
+const USER_AGENT = process.env.RADAR_USER_AGENT ?? 'DealRift/1.3 (https://github.com/EazyHood/DealRift)'
 const REFRESH_SECONDS = 300
-const APP_VERSION = process.env.DEALRIFT_VERSION ?? '1.2.0-beta.1'
+const APP_VERSION = process.env.DEALRIFT_VERSION ?? '1.3.0-beta.1'
 const dataDir = process.env.DEALRIFT_DATA_DIR ? path.resolve(process.env.DEALRIFT_DATA_DIR) : path.join(process.cwd(), 'data')
 const historyFile = path.join(dataDir, 'deal-history.json')
 const priceHistoryFile = path.join(dataDir, 'deal-price-history.json')
@@ -170,6 +174,8 @@ const marketplaceTemplates = [
 ]
 
 const querySchema = z.object({
+  ecosystem: z.enum(['pc', 'playstation', 'xbox']).default('pc'),
+  onlyFree: z.preprocess((value) => value === 'true' ? true : value === 'false' ? false : value, z.boolean().default(false)),
   country: z.string().regex(/^[a-zA-Z]{2}$/).default('US').transform((value) => value.toUpperCase()),
   locale: z.string().min(2).max(35).regex(/^[a-zA-Z0-9-]+$/).default('en-US'),
   limit: z.coerce.number().int().min(10).max(120).default(70),
@@ -978,10 +984,10 @@ function attachRegionalHighlights(deals: Deal[], scans: RegionalScan[]) {
 function dedupeDeals(deals: Deal[], country: string) {
   const byKey = new Map<string, Deal>()
   const local = new Set(deals.filter((deal) => deal.priceCountry === country && !deal.freshness?.stale)
-    .map((deal) => `${deal.source.toLowerCase()}:${canonicalGameKey(deal.title)}`))
+    .map((deal) => `${deal.source.toLowerCase()}:${gameIdentity(deal)}`))
 
   for (const deal of deals) {
-    const titleKey = canonicalGameKey(deal.title)
+    const titleKey = gameIdentity(deal)
     const identity = `${deal.source.toLowerCase()}:${titleKey}`
     // A US reference quote must never displace the selected country's product price.
     if (deal.priceCountry !== country && local.has(identity)) continue
@@ -1076,6 +1082,8 @@ async function writeHistory(points: DealHistoryPoint[]) {
 async function recordHistory(response: RadarResponse) {
   const topDeal = response.deals.find((deal) => isCurrentVerifiedDeal(deal, response.country))
   const nextPoint: DealHistoryPoint = {
+    ecosystem: response.ecosystem ?? 'pc',
+    country: response.country,
     updatedAt: response.updatedAt,
     totalDeals: response.metrics.totalDeals,
     freebies: response.metrics.freebies,
@@ -1086,8 +1094,8 @@ async function recordHistory(response: RadarResponse) {
   }
 
   const history = await readHistory()
-  const withoutSameMinute = history.filter((point) => point.updatedAt.slice(0, 16) !== nextPoint.updatedAt.slice(0, 16))
-  await writeHistory([...withoutSameMinute, nextPoint].slice(-144))
+  const withoutSameMinute = history.filter((point) => (point.ecosystem ?? 'pc') !== nextPoint.ecosystem || point.country !== nextPoint.country || point.updatedAt.slice(0, 16) !== nextPoint.updatedAt.slice(0, 16))
+  await writeHistory([...withoutSameMinute, nextPoint].slice(-432))
 }
 
 async function readPriceHistory(): Promise<DealPriceHistoryDatabase> {
@@ -1118,8 +1126,10 @@ app.get('/api/health', async (_req, res) => {
   })
 })
 
-app.get('/api/history', async (_req, res) => {
-  res.json(await readHistory())
+app.get('/api/history', async (req, res) => {
+  const parsed = z.object({ ecosystem: z.enum(['pc', 'playstation', 'xbox']).default('pc'), country: z.string().regex(/^[A-Z]{2}$/).optional() }).safeParse(req.query)
+  if (!parsed.success) { res.status(400).json({ error: 'Invalid platform or country.' }); return }
+  res.json((await readHistory()).filter((point) => (point.ecosystem ?? 'pc') === parsed.data.ecosystem && (!parsed.data.country || point.country === parsed.data.country)))
 })
 
 app.get('/api/stores', async (_req, res) => {
@@ -1173,7 +1183,53 @@ function cachedDeals(result: PromiseSettledResult<Cached<Deal[]>>, country: stri
   })
 }
 
+async function loadConsoleRadar(params: LoadRadarParams & { ecosystem: 'playstation' | 'xbox' }): Promise<RadarResponse> {
+  const { ecosystem, country, locale, limit, minSavings, search, onlyFree } = params
+  const name = ecosystem === 'playstation' ? 'PlayStation Store' : 'Xbox'
+  const [source] = await Promise.allSettled([withCache(`console:${ecosystem}:${country}:${locale}:${limit}:${minSavings}:${Boolean(onlyFree)}:${search ?? ''}`, 5 * 60 * 1000, async () => {
+    const result = await (ecosystem === 'playstation' ? fetchPlayStationDeals : fetchXboxDeals)(params)
+    const needsRates = result.deals.some((deal) => deal.salePrice.currency !== 'USD')
+    const rates = needsRates ? await getExchangeRates() : undefined
+    if (rates?.stale) throw new Error(`Exchange rates unavailable: ${rates.error}`)
+    return { ...result, deals: result.deals.map((deal) => ({
+      ...deal,
+      salePrice: { ...deal.salePrice, usd: roundMoney(toUsd(deal.salePrice.amount, deal.salePrice.currency, rates?.value ?? {})) },
+      normalPrice: deal.normalPrice ? { ...deal.normalPrice, usd: roundMoney(toUsd(deal.normalPrice.amount, deal.normalPrice.currency, rates?.value ?? {})) } : undefined,
+    })) }
+  })])
+  const sourceStatus = [sourceResultStatus(name, source, source.status === 'fulfilled' ? source.value.value.message : '', search ? 'catalog-search' : 'catalog-sample')]
+  const adapted = source.status === 'fulfilled'
+    ? { status: 'fulfilled' as const, value: { ...source.value, value: source.value.value.deals } }
+    : source
+  const base = dedupeDeals(cachedDeals(adapted, country), country)
+  let deals: Deal[]
+  try {
+    deals = await withPriceHistory(async (history) => {
+      const enriched = enrichDealsWithIntelligence(base, country, history)
+      await writeJsonAtomic(priceHistoryFile, recordPriceObservations(history, enriched, country))
+      return enriched
+    })
+  } catch (error) {
+    deals = enrichDealsWithIntelligence(base, country, await readPriceHistory())
+    sourceStatus.push(status('Deal intelligence', false, error instanceof Error ? error.message : 'Unable to save price history.'))
+  }
+  deals.sort((a, b) => (b.intelligence?.score ?? b.signalScore) - (a.intelligence?.score ?? a.signalScore))
+  const response: RadarResponse = {
+    ecosystem, country, locale, updatedAt: nowIso(), refreshSeconds: REFRESH_SECONDS,
+    deals: deals.slice(0, limit), stores: [{ id: ecosystem, name, isActive: true, kind: 'official' }],
+    regionalScans: [], marketScouts: [], metrics: metricsFor(deals.slice(0, limit), [], country), sourceStatus,
+  }
+  if (!search && !onlyFree && source.status === 'fulfilled' && !source.value.stale) {
+    const record = historyWriteQueue.then(() => recordHistory(response))
+    historyWriteQueue = record.catch(() => undefined)
+    try { await record } catch { sourceStatus.push(status('Radar history', false, 'Unable to save radar history.')) }
+  }
+  return response
+}
+
 export interface LoadRadarParams {
+  onlyFree?: boolean
+  ecosystem?: GameEcosystem
   country: string
   locale: string
   limit: number
@@ -1183,6 +1239,8 @@ export interface LoadRadarParams {
 }
 
 export async function loadRadar(params: LoadRadarParams): Promise<RadarResponse> {
+  const parsed = querySchema.parse(params)
+  if (parsed.ecosystem !== 'pc') return loadConsoleRadar({ ...parsed, ecosystem: parsed.ecosystem })
   const { country, locale, limit, minSavings, search, regionSample } = querySchema.parse(params)
   const sourceStatus: SourceStatus[] = []
   const [storesResult, cheapResult, epicResult, steamResult, gogResult] = await Promise.allSettled([
@@ -1246,7 +1304,7 @@ export async function loadRadar(params: LoadRadarParams): Promise<RadarResponse>
   const providerLinks = allDeals.filter((deal) => deal.tags.includes('provider-redirect')).length
   sourceStatus.push(status('Destination links', true, `${providerLinks} required CheapShark redirects; remaining offers use store product links.`))
   const response: RadarResponse = {
-    updatedAt: nowIso(), refreshSeconds: REFRESH_SECONDS, country, locale, deals: allDeals, stores,
+    ecosystem: 'pc', updatedAt: nowIso(), refreshSeconds: REFRESH_SECONDS, country, locale, deals: allDeals, stores,
     regionalScans, marketScouts, metrics: metricsFor(allDeals, regionalScans, country), sourceStatus,
   }
   const providerResults = [cheapResult, epicResult, steamResult, gogResult]

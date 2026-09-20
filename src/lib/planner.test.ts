@@ -51,3 +51,25 @@ test('edition family only suggests variants and preserves numbered sequels', () 
   assert.equal(editionFamily('Hades II — Deluxe Edition'), editionFamily('Hades II'))
   assert.notEqual(editionFamily('Hades II'), editionFamily('Hades'))
 })
+
+test('console ownership and cheaper offers stay separate across platforms and store editions', () => {
+  const ps = offer('ps-deal', 20, { title: 'Same Game', ecosystem: 'playstation', storeProductId: 'PS-STANDARD', platform: 'PS5' })
+  const xbox = offer('xbox-deal', 2, { title: 'Same Game', ecosystem: 'xbox', storeProductId: 'XBOX-STANDARD', platform: 'Xbox Series X|S' })
+  const pc = offer('pc-deal', 1, { title: 'Same Game', ecosystem: 'pc' })
+  const psDeluxe = offer('ps-deluxe', 3, { title: 'Same Game', ecosystem: 'playstation', storeProductId: 'PS-DELUXE', platform: 'PS5' })
+  const watched: LibraryGame = { ...game('playstation--ps-standard'), title: 'Same Game', ecosystem: 'playstation', storeProductId: 'PS-STANDARD' }
+  const ownedPc = { ...game('same-game', 1, true), title: 'Same Game' }
+  const plan = buildPurchasePlan([watched, ownedPc], [ps, xbox, pc, psDeluxe], 25, 'USD', 'US', now)
+  assert.equal(plan.items.length, 1)
+  assert.equal(plan.items[0].deal.id, 'ps-deal')
+  assert.equal(plan.total, 20)
+  assert.equal(plan.excluded[0].reason, 'owned')
+  assert.equal(buildPurchasePlan([{ ...watched, snapshot: xbox }], [], 25, 'USD', 'US', now).items.length, 0)
+})
+
+test('a console title saved manually matches only its ecosystem and retains its own price', () => {
+  const watched: LibraryGame = { ...game('playstation--title-same-game'), title: 'Same Game', ecosystem: 'playstation' }
+  const ps = offer('ps', 7, { title: 'Same Game™', ecosystem: 'playstation', storeProductId: 'PS-STANDARD' })
+  const xbox = offer('xbox', 1, { title: 'Same Game', ecosystem: 'xbox', storeProductId: 'XBOX-STANDARD' })
+  assert.equal(buildPurchasePlan([watched], [xbox, ps], 10, 'USD', 'US', now).items[0].deal.id, 'ps')
+})

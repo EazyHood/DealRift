@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Check, Eye, Pencil, Trash2 } from 'lucide-react'
 import type { Deal, Language } from '../shared/dealTypes'
 import type { LibraryAction, LibraryGame } from '../shared/libraryTypes'
+import { getGameEcosystem, libraryMatchesDeal } from '../shared/gameIdentity'
 import { formatMoney, parseMoney } from '../lib/planner'
 import { dealStatusLabels } from '../lib/dealStatus'
 
@@ -14,7 +15,9 @@ export function LibraryGameRow({ game, currentDeal, language, country, busy, onA
   const [priority, setPriority] = useState(game.priority)
   const [notes, setNotes] = useState(game.notes)
   const [error, setError] = useState('')
-  const offer = currentDeal ?? game.snapshot
+  const offer = currentDeal && libraryMatchesDeal(game, currentDeal) ? currentDeal : game.snapshot && libraryMatchesDeal(game, game.snapshot) ? game.snapshot : undefined
+  const ecosystem = getGameEcosystem(game)
+  const platform = ecosystem === 'playstation' ? 'PlayStation' : ecosystem === 'xbox' ? 'Xbox' : 'PC'
   const currencies = [...new Set(['USD', ...(country === 'CO' ? ['COP'] : []), ...(offer ? [offer.salePrice.currency] : []), currency])]
   const save = async (event: React.FormEvent) => {
     event.preventDefault()
@@ -30,7 +33,7 @@ export function LibraryGameRow({ game, currentDeal, language, country, busy, onA
     catch { setError(es ? 'No se pudo actualizar el juego. Inténtalo de nuevo.' : 'Could not update this game. Please retry.') }
   }
   return <article className={`library-game ${game.owned ? 'is-owned' : ''}`}>
-    <div className="library-game-main"><div className="library-game-copy"><div className="personal-badges"><span className="personal-badge">{game.priority === 1 ? (es ? 'Prioridad alta' : 'High priority') : game.priority === 2 ? (es ? 'Prioridad normal' : 'Normal priority') : (es ? 'Prioridad baja' : 'Low priority')}</span>{game.owned ? <span className="personal-badge positive">{es ? 'En tu biblioteca' : 'Owned'}</span> : null}</div><h3>{game.title}</h3>
+    <div className="library-game-main"><div className="library-game-copy"><div className="personal-badges"><span className="personal-badge">{platform}{offer && ecosystem !== 'pc' ? ` · ${offer.platform}` : ''}</span><span className="personal-badge">{game.priority === 1 ? (es ? 'Prioridad alta' : 'High priority') : game.priority === 2 ? (es ? 'Prioridad normal' : 'Normal priority') : (es ? 'Prioridad baja' : 'Low priority')}</span>{game.owned ? <span className="personal-badge positive">{es ? `Poseído en ${platform}` : `Owned on ${platform}`}</span> : null}</div><h3>{game.title}</h3>
       {offer ? <><p><strong>{formatMoney(offer.salePrice.amount, offer.salePrice.currency, language)}</strong> · {offer.source}<small>{currentDeal ? (es ? 'En los resultados actuales' : 'In current results') : (es ? 'Última oferta guardada' : 'Last saved offer')} · {new Date(offer.freshness?.updatedAt ?? offer.detectedAt).toLocaleString(es ? 'es-CO' : 'en-US')}</small></p>{dealStatusLabels(offer, country, language).map((warning) => <p className="personal-price-warnings" key={warning}>{warning}</p>)}</> : <p className="personal-muted">{es ? 'Sin oferta guardada. Comprueba favoritos para buscar precios.' : 'No saved offer. Check favorites to look for prices.'}</p>}
       {game.targetPrice ? <p className="library-target">{es ? 'Avisarme a' : 'Notify me at'} {formatMoney(game.targetPrice.amount, game.targetPrice.currency, language)} {es ? 'o menos' : 'or less'}</p> : null}{game.notes && !editing ? <p className="library-notes">{game.notes}</p> : null}
     </div><div className="library-game-actions"><button type="button" disabled={busy} aria-pressed={game.watched} onClick={() => void toggle('watched')}><Eye size={16} />{game.watched ? (es ? 'Vigilando' : 'Watching') : (es ? 'Vigilar' : 'Watch')}</button><button type="button" disabled={busy} aria-pressed={game.owned} onClick={() => void toggle('owned')}><Check size={16} />{game.owned ? (es ? 'Lo tengo' : 'Owned') : (es ? 'Marcar poseído' : 'Mark owned')}</button>{offer ? <button type="button" onClick={() => onOpenGame(offer)}>{es ? 'Ver ficha' : 'View detail'}</button> : null}<button type="button" aria-expanded={editing} onClick={() => { setEditing(!editing); setAmount(String(game.targetPrice?.amount ?? '')); setCurrency(game.targetPrice?.currency ?? offer?.salePrice.currency ?? 'USD'); setNotes(game.notes); setPriority(game.priority); setError('') }}><Pencil size={15} />{es ? 'Editar' : 'Edit'}</button></div></div>

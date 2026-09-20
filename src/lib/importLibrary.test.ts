@@ -62,3 +62,28 @@ test('formula-looking CSV text remains inert text and unknown executable fields 
   assert.equal(json.games[0].owned, false)
   assert.equal('url' in json.games[0], false)
 })
+
+test('console imports isolate licenses, retain product IDs and keep legacy PC identities', () => {
+  const imported = parseLibraryImport('title,ecosystem,storeProductId\nHades,,\nHades,playstation,UP2125-PPSA03355_00-0000000000000000\nHades,xbox,9P8DL6W0JBB8', 'games.csv')
+  assert.equal(imported.games.length, 3)
+  assert.equal(imported.games[0].id, 'hades')
+  assert.equal(imported.games[1].ecosystem, 'playstation')
+  assert.match(imported.games[1].id, /^playstation--/)
+  assert.equal(imported.games[2].storeProductId, '9P8DL6W0JBB8')
+  assert.throws(() => parseLibraryImport('[{"title":"Hades","ecosystem":"invalid"}]', 'games.json'))
+  assert.throws(() => parseLibraryImport('[{"title":"Hades","ecosystem":"xbox","storeProductId":"../../foo"}]', 'games.json'))
+})
+
+test('console snapshots and ratings roundtrip while lookalike store URLs are rejected', () => {
+  const consoleBackup = structuredClone(backup)
+  const game = consoleBackup.games[0]
+  game.ecosystem = 'xbox'; game.storeProductId = '9P8DL6W0JBB8'; game.id = 'xbox--9p8dl6w0jbb8'
+  game.snapshot = { ...game.snapshot!, ecosystem: 'xbox', storeProductId: game.storeProductId, storeRatingPercent: 94, url: 'https://www.xbox.com/es-co/games/store/hades/9P8DL6W0JBB8' }
+  const restored = parseLibraryImport(exportLibraryBackup(consoleBackup), 'backup.json').restore!
+  assert.equal(restored.games[0].ecosystem, 'xbox')
+  assert.equal(restored.games[0].snapshot?.storeRatingPercent, 94)
+  for (const host of ['store.playstation.com', 'www.xbox.com', 'www.microsoft.com']) {
+    assert.equal(safeImportedStoreUrl(`https://${host}/product/game`), true)
+    assert.equal(safeImportedStoreUrl(`https://${host}.evil.test/product/game`), false)
+  }
+})

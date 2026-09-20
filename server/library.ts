@@ -1,9 +1,10 @@
+import { getGameEcosystem, libraryMatchesDeal } from '../src/shared/gameIdentity.js'
 import { createHash } from 'node:crypto'
 import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import express, { type Express, type RequestHandler, type ErrorRequestHandler } from 'express'
 import { z } from 'zod'
-import type { Deal, RadarResponse } from '../src/shared/dealTypes.js'
+import type { Deal, GameEcosystem, RadarResponse } from '../src/shared/dealTypes.js'
 import type { AlertRecord, LibraryAction, LibraryGame, LibraryState } from '../src/shared/libraryTypes.js'
 import { writeJsonAtomic } from './persistence.js'
 import { isTrustedStoreUrl } from './storeLinks.js'
@@ -40,6 +41,7 @@ const intelligenceSchema = z.object({
 }).strict()
 
 export const snapshotSchema = z.object({
+  ecosystem: z.enum(['pc', 'playstation', 'xbox']).optional(), storeProductId: z.string().regex(/^[A-Za-z0-9_-]{1,100}$/).optional(), storeRatingPercent: finite.min(0).max(100).optional(),
   id: z.string().min(1).max(500), title: z.string().min(1).max(300), source: text,
   sourceKind: z.enum(['official', 'authorized', 'marketplace', 'freebie', 'regional']), platform: text,
   image: imageUrl, url: storeUrl, salePrice: priceSchema, normalPrice: priceSchema.optional(),
@@ -54,6 +56,7 @@ export const snapshotSchema = z.object({
   availability: z.enum(['active', 'upcoming', 'expired']).optional(), priceCountry: z.string().regex(/^[A-Z]{2}$/).optional(),
 }).strict()
 const gameSchema = z.object({
+  ecosystem: z.enum(['pc', 'playstation', 'xbox']).optional(), storeProductId: z.string().regex(/^[A-Za-z0-9_-]{1,100}$/).optional(),
   id: z.string().min(1).max(300), title: z.string().trim().min(1).max(300), steamAppId: z.string().regex(/^\d{1,12}$/).optional(),
   owned: z.boolean(), watched: z.boolean(), priority: z.union([z.literal(1), z.literal(2), z.literal(3)]),
   notes: text, targetPrice: z.object({ amount: money, currency }).strict().optional(), snapshot: snapshotSchema.optional(), updatedAt: instant,
@@ -64,6 +67,7 @@ const numericSetting = (minimum: number, maximum: number) => z.string()
   .regex(/^(0|[1-9]\d*)(\.\d+)?$/)
   .refine((value) => Number.isFinite(Number(value)) && Number(value) >= minimum && Number(value) <= maximum)
 const settingValidators: Record<string, z.ZodType<string>> = {
+  'dealrift-ecosystem': z.enum(['pc', 'playstation', 'xbox']),
   'dealrift-language': z.enum(['es', 'en']),
   'dealrift-country': z.enum(['US', 'CO', 'IN', 'TR', 'AR', 'BR', 'MX', 'CL', 'PE', 'ID', 'MY', 'PH', 'TH', 'VN', 'ZA', 'PL', 'CN', 'JP', 'KR', 'GB', 'DE', 'ES', 'CA', 'AU']),
   'dealrift-sort-mode': z.enum(['value', 'price', 'savings', 'regional', 'rating', 'ending', 'signal']),
@@ -112,10 +116,10 @@ const actionSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('read-alerts') }).strict(),
 ])
 
-export interface LibraryRadarParams { country: string; locale: string; limit: number; minSavings: number; search?: string; regionSample: number }
+export interface LibraryRadarParams { ecosystem?: GameEcosystem; country: string; locale: string; limit: number; minSavings: number; search?: string; regionSample: number }
 interface LibraryOptions { dataDir: string; queryRadar: (params: LibraryRadarParams) => Promise<RadarResponse> }
 function emptyLibrary(): LibraryState { return { schemaVersion: 1, revision: 0, settings: {}, games: [], alerts: [] } }
-function normalizedTitle(value: string) { return value.replace(/[™®©]/g, '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim() }
+
 
 export function isQuietHours(settings: Record<string, string>, now = new Date()) {
   const start = settings['dealrift-quiet-start']
@@ -231,15 +235,16 @@ export function createLibraryService(options: LibraryOptions) {
         const game = watched[cursor++]
         let offers: Deal[] = []
         let queryFailed = false
-        const matchesEdition = (deal: Deal) => normalizedTitle(deal.title) === normalizedTitle(game.title)
+        const ecosystem = getGameEcosystem(game)
+        const matchesEdition = (deal: Deal) => libraryMatchesDeal(game, deal)
         try {
-          const radar = await options.queryRadar({ country, locale, limit: 120, minSavings: 0, search: game.title, regionSample: 0 })
+          const radar = await options.queryRadar({ ecosystem, country, locale, limit: 120, minSavings: 0, search: ecosystem !== 'pc' && (game.storeProductId ?? game.snapshot?.storeProductId) ? `product:${game.storeProductId ?? game.snapshot?.storeProductId}` : game.title, regionSample: 0 })
           offers = radar.deals.filter((deal) => matchesEdition(deal) && (!game.steamAppId || !deal.steamAppId || deal.steamAppId === game.steamAppId) && validCurrentOffer(deal, country, Date.now()))
         } catch { queryFailed = true }
         const comparable = !game.targetPrice || offers.some((offer) => targetAmount(offer, game.targetPrice!.currency) !== undefined)
         // Titles can miss provider search punctuation, while a saved Steam ID is stable.
         // Keep title/edition matching as well: a base app ID must not merge a deluxe edition.
-        if (game.steamAppId && (!offers.length || !comparable)) {
+        if (ecosystem === 'pc' && game.steamAppId && (!offers.length || !comparable)) {
           try {
             const radar = await options.queryRadar({ country, locale, limit: 120, minSavings: 0, search: `steam:${game.steamAppId}`, regionSample: 0 })
             const exact = radar.deals.filter((deal) => deal.steamAppId === game.steamAppId && matchesEdition(deal) && validCurrentOffer(deal, country, Date.now()))

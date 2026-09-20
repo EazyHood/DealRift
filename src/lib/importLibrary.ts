@@ -1,3 +1,5 @@
+import { gameIdentity } from '../shared/gameIdentity'
+import type { GameEcosystem } from '../shared/dealTypes'
 import type { LibraryGame, LibraryState } from '../shared/libraryTypes'
 import { parseMoney } from './planner'
 import { importedAlertSchema, importedDateSchema, importedSettingsSchema, importedSnapshotSchema } from './importSchemas'
@@ -26,8 +28,12 @@ function parseGame(value: unknown, now: string, preserve = false): LibraryGame {
   const raw = typeof value === 'string' ? { title: value } : record(value)
   if (typeof raw.title !== 'string' || !raw.title.trim() || raw.title.length > 300) throw new Error('Each game needs a title (1–300 characters) / Cada juego necesita un título de 1–300 caracteres.')
   const title = raw.title.trim()
+  const ecosystem = raw.ecosystem === undefined || raw.ecosystem === '' ? undefined : String(raw.ecosystem) as GameEcosystem
+  if (ecosystem && !['pc', 'playstation', 'xbox'].includes(ecosystem)) throw new Error('Invalid ecosystem / Plataforma inválida: pc, playstation, xbox.')
+  const storeProductId = raw.storeProductId === undefined || raw.storeProductId === '' ? undefined : String(raw.storeProductId).toUpperCase()
+  if (storeProductId && !/^[A-Za-z0-9_-]{1,100}$/.test(storeProductId)) throw new Error('Invalid store product ID / Identificador de tienda inválido.')
   if (preserve && (typeof raw.id !== 'string' || !raw.id || raw.id.length > 300)) throw new Error('Invalid game ID in backup / Identificador de juego inválido en la copia.')
-  const id = preserve && typeof raw.id === 'string' && raw.id.length > 0 && raw.id.length <= 300 ? raw.id : titleId(title)
+  const id = preserve && typeof raw.id === 'string' && raw.id.length > 0 && raw.id.length <= 300 ? raw.id : gameIdentity({ title, ecosystem, storeProductId })
   if (!id) throw new Error('Title needs at least one letter or number / El título necesita letras o números.')
   const priority = Number(raw.priority || 2)
   if (![1, 2, 3].includes(priority)) throw new Error('Priority must be 1, 2 or 3 / La prioridad debe ser 1, 2 o 3.')
@@ -35,7 +41,7 @@ function parseGame(value: unknown, now: string, preserve = false): LibraryGame {
   if (steamAppId && !/^\d{1,12}$/.test(steamAppId)) throw new Error('Invalid Steam app ID / ID de Steam inválido.')
   if (raw.notes !== undefined && (typeof raw.notes !== 'string' || raw.notes.length > 2000)) throw new Error('Notes must be text under 2,000 characters / Notas: máximo 2.000 caracteres.')
   const owned = boolean(raw.owned, false)
-  const game: LibraryGame = { id, title, steamAppId, owned, watched: boolean(raw.watched, !owned), priority: priority as 1 | 2 | 3, notes: String(raw.notes ?? ''), updatedAt: preserve && raw.updatedAt !== undefined ? importedDateSchema.parse(raw.updatedAt) : now }
+  const game: LibraryGame = { id, title, ecosystem, storeProductId, steamAppId, owned, watched: boolean(raw.watched, !owned), priority: priority as 1 | 2 | 3, notes: String(raw.notes ?? ''), updatedAt: preserve && raw.updatedAt !== undefined ? importedDateSchema.parse(raw.updatedAt) : now }
   const target = raw.targetPrice === undefined ? undefined : record(raw.targetPrice)
   const amountInput = target?.amount ?? raw.targetAmount
   if (amountInput !== undefined && amountInput !== '') {

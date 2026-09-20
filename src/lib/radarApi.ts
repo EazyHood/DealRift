@@ -1,6 +1,8 @@
-import type { DealHistoryPoint, RadarResponse, RegionalScan } from '../shared/dealTypes'
+import type { GameEcosystem, DealHistoryPoint, RadarResponse, RegionalScan } from '../shared/dealTypes'
 
 export interface RadarParams {
+  onlyFree?: boolean
+  ecosystem?: GameEcosystem
   country: string
   locale: string
   limit: number
@@ -11,6 +13,8 @@ export interface RadarParams {
 
 export async function fetchRadar(params: RadarParams, signal?: AbortSignal) {
   const query = new URLSearchParams({
+    ecosystem: params.ecosystem ?? 'pc',
+    onlyFree: String(params.onlyFree ?? false),
     country: params.country,
     locale: params.locale,
     limit: String(params.limit),
@@ -38,8 +42,8 @@ export async function fetchRegionalScan(appId: string, title: string, country: s
   return (await response.json()) as RegionalScan
 }
 
-export async function fetchHistory(signal?: AbortSignal) {
-  const response = await fetch('/api/history', { signal })
+export async function fetchHistory(signal?: AbortSignal, ecosystem: GameEcosystem = 'pc', country?: string) {
+  const response = await fetch(`/api/history?${new URLSearchParams({ ecosystem, ...(country ? { country } : {}) })}`, { signal })
   if (!response.ok) {
     throw new Error(`History API failed: ${response.status}`)
   }

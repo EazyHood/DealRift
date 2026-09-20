@@ -3,21 +3,21 @@
 
 # DealRift
 
-**A local-first radar for PC game deals, giveaways, regional prices, and explainable offer intelligence.**
+**A local-first radar for PC, PlayStation and Xbox game deals, giveaways, and explainable price intelligence.**
 
 [![CI](https://github.com/EazyHood/DealRift/actions/workflows/ci.yml/badge.svg)](https://github.com/EazyHood/DealRift/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/EazyHood/DealRift?include_prereleases&label=release)](https://github.com/EazyHood/DealRift/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-55e6c1.svg)](LICENSE)
-[![Windows x64](https://img.shields.io/badge/Windows-x64-2f80ed.svg)](https://github.com/EazyHood/DealRift/releases/download/v1.2.0-beta.1/DealRift-1.2.0-beta.1-portable.exe)
+[![Windows x64](https://img.shields.io/badge/Windows-x64-2f80ed.svg)](https://github.com/EazyHood/DealRift/releases/download/v1.3.0-beta.1/DealRift-1.3.0-beta.1-portable.exe)
 
-[![Descargar para Windows / Download for Windows (.exe)](https://img.shields.io/badge/Descargar_para_Windows-.exe_portable-2f80ed?style=for-the-badge&logo=windows)](https://github.com/EazyHood/DealRift/releases/download/v1.2.0-beta.1/DealRift-1.2.0-beta.1-portable.exe)
+[![Descargar para Windows / Download for Windows (.exe)](https://img.shields.io/badge/Descargar_para_Windows-.exe_portable-2f80ed?style=for-the-badge&logo=windows)](https://github.com/EazyHood/DealRift/releases/download/v1.3.0-beta.1/DealRift-1.3.0-beta.1-portable.exe)
 
-**[Descargar .exe / Download .exe — v1.2.0-beta.1](https://github.com/EazyHood/DealRift/releases/download/v1.2.0-beta.1/DealRift-1.2.0-beta.1-portable.exe)**
+**[Descargar .exe / Download .exe — v1.3.0-beta.1](https://github.com/EazyHood/DealRift/releases/download/v1.3.0-beta.1/DealRift-1.3.0-beta.1-portable.exe)**
 
-[SHA-256 checksum](https://github.com/EazyHood/DealRift/releases/download/v1.2.0-beta.1/SHA256SUMS.txt) | [Release notes](https://github.com/EazyHood/DealRift/releases/tag/v1.2.0-beta.1) | [All releases](https://github.com/EazyHood/DealRift/releases) | [Report a bug](https://github.com/EazyHood/DealRift/issues/new/choose) | [Data sources](DATA_SOURCES.md) | [Privacy](PRIVACY.md)
+[SHA-256 checksum](https://github.com/EazyHood/DealRift/releases/download/v1.3.0-beta.1/SHA256SUMS.txt) | [Release notes](https://github.com/EazyHood/DealRift/releases/tag/v1.3.0-beta.1) | [All releases](https://github.com/EazyHood/DealRift/releases) | [Report a bug](https://github.com/EazyHood/DealRift/issues/new/choose) | [Data sources](DATA_SOURCES.md) | [Privacy](PRIVACY.md)
 </div>
 
-> **Resumen en espanol:** DealRift compara ofertas reales, juegos gratis y precios regionales desde una interfaz disponible en espanol e ingles. **[Descarga aqui el `.exe` portable para Windows x64](https://github.com/EazyHood/DealRift/releases/download/v1.2.0-beta.1/DealRift-1.2.0-beta.1-portable.exe)**; no requiere instalador, terminal ni Node.js. El boton verde **Code > Download ZIP** descarga el codigo fuente, no la aplicacion.
+> **Resumen en espanol:** DealRift compara ofertas reales, juegos gratis y precios regionales desde una interfaz disponible en espanol e ingles. **[Descarga aqui el `.exe` portable para Windows x64](https://github.com/EazyHood/DealRift/releases/download/v1.3.0-beta.1/DealRift-1.3.0-beta.1-portable.exe)**; no requiere instalador, terminal ni Node.js. El boton verde **Code > Download ZIP** descarga el codigo fuente, no la aplicacion.
 
 ![DealRift desktop dashboard](screenshots/final-desktop.jpg)
 
@@ -25,11 +25,11 @@
 
 DealRift currently ships as a portable **Windows x64** application:
 
-1. **[Download DealRift-1.2.0-beta.1-portable.exe](https://github.com/EazyHood/DealRift/releases/download/v1.2.0-beta.1/DealRift-1.2.0-beta.1-portable.exe)**.
-2. Download [SHA256SUMS.txt](https://github.com/EazyHood/DealRift/releases/download/v1.2.0-beta.1/SHA256SUMS.txt) from the same release.
+1. **[Download DealRift-1.3.0-beta.1-portable.exe](https://github.com/EazyHood/DealRift/releases/download/v1.3.0-beta.1/DealRift-1.3.0-beta.1-portable.exe)**.
+2. Download [SHA256SUMS.txt](https://github.com/EazyHood/DealRift/releases/download/v1.3.0-beta.1/SHA256SUMS.txt) from the same release.
 3. Run the executable directly. It starts the UI and its private local API without a visible console.
 
-If you prefer the release page, open [v1.2.0-beta.1](https://github.com/EazyHood/DealRift/releases/tag/v1.2.0-beta.1), expand **Assets**, and choose the `.exe`. The **Source code (zip/tar.gz)** files do not contain the built app. The download links above point to this beta explicitly because GitHub's `releases/latest` endpoint excludes pre-releases.
+If you prefer the release page, open [v1.3.0-beta.1](https://github.com/EazyHood/DealRift/releases/tag/v1.3.0-beta.1), expand **Assets**, and choose the `.exe`. The **Source code (zip/tar.gz)** files do not contain the built app. The download links above point to this beta explicitly because GitHub's `releases/latest` endpoint excludes pre-releases.
 
 The public beta is not code signed yet, so Windows SmartScreen can display an unknown-publisher warning. Download only from this repository and verify the checksum:
 
@@ -43,6 +43,7 @@ The two hashes must match exactly.
 ## Highlights
 
 - Live PC discounts from official and authorized stores, plus active and upcoming Epic giveaways.
+- PlayStation and Xbox official catalog search and country prices, with platform and console filters, favorites, targets, alerts and observed history. Console editions remain separate from PC licenses.
 - Steam price sampling across 24 countries with currency normalization and regional caveats.
 - English and Spanish UI, source/store/country filters, price sorting, search, and pages of 10, 20, 30, or 40 games.
 - Explainable deal verdicts based on observed history, market position, source confidence, risk, ratings, regional advantage, and urgency.
@@ -60,11 +61,19 @@ The two hashes must match exactly.
 
 Read the [personal library guide](LIBRARY_GUIDE.md) for import formats, backups, targets, quiet hours and background monitoring.
 
+## PlayStation and Xbox
+
+Choose **PC**, **PlayStation** or **Xbox** above the search box. Search by title, or use `product:ID` from an official product URL for an exact console edition. Set minimum savings to **0%** to include games without a current discount. Use the console selector for PS4/PS5 or Xbox One/Series compatibility published by the store.
+
+The same price, discount, free-game, rating, ending-soon, risk, favorites and intelligence filters apply to available source data. Console prices are checked for the selected country; Colombia's PlayStation store can quote USD while Xbox quotes COP. The maximum-price slider uses approximate USD, and saved targets may use the native currency. Public purchase prices exclude membership-only PS Plus/Game Pass entitlements, trials and identified add-ons.
+
+Catalog results are bounded, and an empty result does not prove that a game is unavailable. Unknown ratings and missing promotion end dates never become invented values. Source status reports coverage. The automatic cross-country scanner currently supports **Steam**; console country selection checks that country's store and does not establish eligibility to buy in another region.
+
 ## Deal intelligence
 
 DealRift does not equate a large discount label with a good purchase. Each offer receives an evidence-aware score and a readable verdict. New installations begin in a collecting state; an observed low is not claimed until at least three observations spanning twelve hours exist.
 
-Free offers are accepted only when the source data and current price agree. Regional savings are rewarded only when the sampled country actually beats the offer being evaluated. Cleaner or cheaper alternatives are grouped by normalized game edition without merging unrelated editions.
+Free offers are accepted only when the source data and current price agree. Regional savings are rewarded only when the sampled country actually beats the offer being evaluated. PC alternatives are grouped by normalized game edition. Console offers use their ecosystem and official product ID, so PC, PlayStation, Xbox and separate console editions never share ownership, market comparisons or price history.
 
 ## Link and safety model
 
@@ -78,7 +87,7 @@ These checks reduce technical risk; they do not guarantee seller reputation, key
 
 ## Data sources
 
-DealRift currently integrates CheapShark, Epic Games Store promotions, Steam Store endpoints, the GOG catalog, and Exchange Rate API. See [DATA_SOURCES.md](DATA_SOURCES.md) for purpose, limitations, link policy, and marketplace behavior.
+DealRift currently integrates CheapShark, Epic Games Store promotions, Steam Store endpoints, the GOG catalog, public PlayStation Store queries, the Microsoft/Xbox catalog, and Exchange Rate API. See [DATA_SOURCES.md](DATA_SOURCES.md) for purpose, limitations, link policy, and marketplace behavior.
 
 DealRift is not affiliated with or endorsed by these providers. Store names, game names, trademarks, cover images, and catalog content belong to their respective owners.
 
