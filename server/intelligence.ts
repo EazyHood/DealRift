@@ -16,6 +16,7 @@ export interface DealPriceObservation {
   at: string
   bestPaidUsd?: number
   bestStore?: string
+  freeStore?: string
   free: boolean
   offerCount: number
 }
@@ -44,7 +45,17 @@ function clamp(value: number, minimum: number, maximum: number) {
 }
 
 function dealUsd(deal: Deal) {
-  return deal.salePrice.usd ?? deal.salePrice.amount
+  return deal.salePrice.usd ?? (deal.salePrice.currency === 'USD' ? deal.salePrice.amount : Number.NaN)
+}
+
+/** Only verified, currently claimable prices can support comparisons or historical claims. */
+export function isCurrentVerifiedDeal(deal: Deal, country?: string, now = Date.now()) {
+  if (deal.freshness?.stale || deal.confidence === 'fallback' || deal.confidence === 'search-link') return false
+  if (deal.availability === 'upcoming' || deal.availability === 'expired' || deal.tags.includes('upcoming')) return false
+  if (deal.startsAt && (!Number.isFinite(Date.parse(deal.startsAt)) || Date.parse(deal.startsAt) > now)) return false
+  if (deal.expiresAt && (!Number.isFinite(Date.parse(deal.expiresAt)) || Date.parse(deal.expiresAt) <= now)) return false
+  if (country && (deal.priceCountry ? deal.priceCountry !== country.toUpperCase() : !deal.countries.includes(country.toUpperCase()))) return false
+  return Number.isFinite(dealUsd(deal)) && dealUsd(deal) >= 0
 }
 
 export function canonicalGameKey(title: string) {
@@ -77,10 +88,10 @@ export function parsePriceHistory(value: unknown): DealPriceHistoryDatabase {
         if (!observation || typeof observation !== 'object') return false
         const point = observation as Partial<DealPriceObservation>
         return (
-          typeof point.at === 'string' &&
+          typeof point.at === 'string' && Number.isFinite(Date.parse(point.at)) &&
           typeof point.free === 'boolean' &&
-          typeof point.offerCount === 'number' &&
-          (point.bestPaidUsd === undefined || typeof point.bestPaidUsd === 'number')
+          typeof point.offerCount === 'number' && Number.isFinite(point.offerCount) && point.offerCount >= 0 &&
+          (point.bestPaidUsd === undefined || (typeof point.bestPaidUsd === 'number' && Number.isFinite(point.bestPaidUsd) && point.bestPaidUsd >= 0))
         )
       })
       .slice(-MAX_OBSERVATIONS_PER_GAME)
@@ -113,6 +124,7 @@ function buildIntelligence(
   group: Deal[],
   history: DealPriceHistoryEntry | undefined,
   now: number,
+  current = true,
 ): DealIntelligence {
   const price = dealUsd(deal)
   const market = [...group].sort((a, b) => dealUsd(a) - dealUsd(b) || b.signalScore - a.signalScore)
@@ -223,8 +235,9 @@ function buildIntelligence(
   confidenceScore += reliableHistory ? 12 : Math.min(8, observations.length * 2)
   confidenceScore += market.length > 1 ? 6 : 0
   confidenceScore = Math.round(clamp(confidenceScore, 5, 100))
-  const normalizedScore = Math.round(clamp(score, 0, 100))
-  const sortedReasons = reasons.sort((a, b) => Math.abs(b.impact) - Math.abs(a.impact)).slice(0, 6)
+  const normalizedScore = current ? Math.round(clamp(score, 0, 100)) : 0
+  if (!current) confidenceScore = Math.min(25, confidenceScore)
+  const sortedReasons = current ? reasons.sort((a, b) => Math.abs(b.impact) - Math.abs(a.impact)).slice(0, 6) : []
 
   return {
     gameKey: canonicalGameKey(deal.title),
@@ -239,16 +252,16 @@ function buildIntelligence(
       paidLowUsd,
       averagePaidUsd,
       reliable: reliableHistory,
-      isObservedLow,
+      isObservedLow: current && isObservedLow,
       wasEverFree,
     },
     market: {
-      offerCount: market.length,
-      storeCount: new Set(market.map((candidate) => candidate.source)).size,
-      rank,
-      lowestUsd: round(lowestUsd),
-      nextBestUsd: alternative ? round(dealUsd(alternative)) : undefined,
-      savingsVsNextUsd: alternative ? round(Math.max(0, dealUsd(alternative) - price)) : undefined,
+      offerCount: current ? market.length : 0,
+      storeCount: current ? new Set(market.map((candidate) => candidate.source)).size : 0,
+      rank: current ? rank : 0,
+      lowestUsd: Number.isFinite(lowestUsd) ? round(lowestUsd) : 0,
+      nextBestUsd: current && alternative ? round(dealUsd(alternative)) : undefined,
+      savingsVsNextUsd: current && alternative ? round(Math.max(0, dealUsd(alternative) - price)) : undefined,
     },
     flags: {
       priceAnomaly,
@@ -266,6 +279,7 @@ export function enrichDealsWithIntelligence(
 ) {
   const groups = new Map<string, Deal[]>()
   for (const deal of deals) {
+    if (!isCurrentVerifiedDeal(deal, country, now)) continue
     const key = canonicalGameKey(deal.title)
     const group = groups.get(key) ?? []
     group.push(deal)
@@ -276,7 +290,7 @@ export function enrichDealsWithIntelligence(
     const gameKey = canonicalGameKey(deal.title)
     return {
       ...deal,
-      intelligence: buildIntelligence(deal, groups.get(gameKey) ?? [deal], database.games[priceHistoryKey(country, deal.title)], now),
+      intelligence: buildIntelligence(deal, groups.get(gameKey) ?? [], database.games[priceHistoryKey(country, deal.title)], now, isCurrentVerifiedDeal(deal, country, now)),
     }
   })
 }
@@ -295,6 +309,7 @@ export function recordPriceObservations(
 ) {
   const groups = new Map<string, Deal[]>()
   for (const deal of deals) {
+    if (!isCurrentVerifiedDeal(deal, country, Date.parse(at))) continue
     const key = priceHistoryKey(country, deal.title)
     const group = groups.get(key) ?? []
     group.push(deal)
@@ -309,6 +324,7 @@ export function recordPriceObservations(
       at,
       bestPaidUsd: bestPaid ? round(dealUsd(bestPaid)) : undefined,
       bestStore: bestPaid?.source,
+      freeStore: group.find((deal) => deal.isFree)?.source,
       free: group.some((deal) => deal.isFree),
       offerCount: group.length,
     }

@@ -3,9 +3,10 @@ import * as THREE from 'three'
 
 interface RadarCanvasProps {
   pulse: number
+  enabled?: boolean
 }
 
-export function RadarCanvas({ pulse }: RadarCanvasProps) {
+export function RadarCanvas({ pulse, enabled = true }: RadarCanvasProps) {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const pulseRef = useRef(pulse)
 
@@ -15,9 +16,15 @@ export function RadarCanvas({ pulse }: RadarCanvasProps) {
 
   useEffect(() => {
     const host = hostRef.current
-    if (!host) return
+    if (!host || !enabled) return
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' })
+    let renderer: THREE.WebGLRenderer
+    try {
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'low-power' })
+    } catch {
+      // The decorative canvas must never prevent access to deals or local data.
+      return
+    }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75))
     renderer.setSize(window.innerWidth, window.innerHeight)
     renderer.domElement.setAttribute('aria-hidden', 'true')
@@ -120,6 +127,10 @@ export function RadarCanvas({ pulse }: RadarCanvasProps) {
     const startedAt = performance.now()
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
     const animate = () => {
+      if (document.hidden) {
+        frameId = requestAnimationFrame(animate)
+        return
+      }
       const elapsed = (performance.now() - startedAt) / 1000
       const pulseScale = 1 + Math.min(0.16, pulseRef.current / 900)
       group.rotation.y = Math.sin(elapsed * 0.08) * 0.22
@@ -157,7 +168,7 @@ export function RadarCanvas({ pulse }: RadarCanvasProps) {
       })
       renderer.dispose()
     }
-  }, [])
+  }, [enabled])
 
-  return <div ref={hostRef} className="radar-canvas" />
+  return <div ref={hostRef} className="radar-canvas" aria-hidden="true" />
 }

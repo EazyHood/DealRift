@@ -20,6 +20,8 @@ You should receive an acknowledgement within seven days. A fix and disclosure ti
 
 - The desktop API binds to `127.0.0.1` on a random port.
 - External navigation is restricted to HTTPS destinations on supported store domains.
+- The only supported provider redirect is CheapShark's exact documented HTTPS endpoint with one validated deal ID. Arbitrary redirect parameters remain blocked.
+- Local library mutations require a loopback Host, same-origin request and validated JSON with size limits. Library writes are serialized and atomic; corrupt files are preserved and reported.
 - DealRift does not request store passwords, payment credentials, or browser cookies.
 - Marketplace and regional offers can still carry commercial, activation, account, or seller risk. Security controls do not guarantee that a third-party listing is legitimate.
 

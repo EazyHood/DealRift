@@ -1,10 +1,70 @@
-const { app, BrowserWindow, dialog, shell } = require('electron')
+const { app, BrowserWindow, dialog, shell, Tray, Menu, Notification, nativeImage } = require('electron')
 const fs = require('node:fs')
 const path = require('node:path')
 const { isInternalAppUrl, isTrustedExternalUrl } = require('./security.cjs')
 
 let mainWindow
 let apiServer
+let apiPort
+let libraryService
+let tray
+let quitting = false
+let closePending = false
+let checking = false
+let checkTimer
+let notificationTimer
+let interfaceLanguage = 'es'
+
+function showWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+}
+
+function ensureTray() {
+  if (!tray) {
+    const icon = nativeImage.createFromPath(path.join(appRoot(), 'build', 'icon.png'))
+    tray = new Tray(icon.resize({ width: 24, height: 24 }))
+    tray.on('double-click', showWindow)
+  }
+  const spanish = interfaceLanguage === 'es'
+  tray.setToolTip(spanish ? 'DealRift · seguimiento de tu lista' : 'DealRift · watching your list')
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: spanish ? 'Abrir DealRift' : 'Open DealRift', click: showWindow },
+    { label: spanish ? 'Buscar actualizaciones' : 'Check for updates', click: () => { void shell.openExternal('https://github.com/EazyHood/DealRift/releases').catch(() => undefined) } },
+    { type: 'separator' },
+    { label: spanish ? 'Salir' : 'Quit', click: () => { quitting = true; app.quit() } },
+  ]))
+}
+
+async function deliverNotifications() {
+  if (!libraryService || !Notification.isSupported()) return
+  const alerts = await libraryService.claimNotifications()
+  if (!alerts.length) return
+  const spanish = interfaceLanguage === 'es'
+  const notification = new Notification({
+    title: spanish ? `DealRift · ${alerts.length} ${alerts.length === 1 ? 'precio encontrado' : 'precios encontrados'}` : `DealRift · ${alerts.length} ${alerts.length === 1 ? 'price match' : 'price matches'}`,
+    body: alerts.length === 1 ? alerts[0].message : `${alerts.slice(0, 3).map((alert) => alert.message).join('\n')}${alerts.length > 3 ? spanish ? '\nAbre tu biblioteca para ver todos.' : '\nOpen your library to see all matches.' : ''}`,
+    icon: path.join(appRoot(), 'build', 'icon.png'),
+  })
+  notification.on('click', showWindow)
+  notification.show()
+}
+
+async function checkWatchedGames() {
+  if (checking || !libraryService) return
+  checking = true
+  try {
+    const state = await libraryService.check()
+    interfaceLanguage = state.settings['dealrift-language'] ?? 'en'
+    if (tray) ensureTray()
+    await deliverNotifications()
+  } catch (error) {
+    // A corrupt or temporarily unavailable library must never be overwritten.
+    console.error('DealRift library check failed:', error instanceof Error ? error.message : String(error))
+  } finally { checking = false }
+}
 
 function reportStartupError(error) {
   const message = error instanceof Error ? `${error.message}\n\n${error.stack ?? ''}` : String(error)
@@ -25,8 +85,9 @@ function appRoot() {
 async function startInternalServer() {
   const root = appRoot()
   process.env.DEALRIFT_DATA_DIR = path.join(app.getPath('userData'), 'data')
-  process.env.RADAR_USER_AGENT = process.env.RADAR_USER_AGENT ?? 'DealRiftDesktop/1.0 (Windows app)'
+  process.env.RADAR_USER_AGENT = process.env.RADAR_USER_AGENT ?? `DealRift/${app.getVersion()} (https://github.com/EazyHood/DealRift)`
   process.env.DEALRIFT_VERSION = app.getVersion()
+  process.env.DEALRIFT_DESKTOP = '1'
 
   const { startRadarServer } = require(path.join(root, 'dist-server', 'index.cjs'))
   const started = await startRadarServer({
@@ -36,11 +97,13 @@ async function startInternalServer() {
   })
 
   apiServer = started.server
+  libraryService = started.libraryService
   return started.port
 }
 
 async function createWindow() {
-  const port = await startInternalServer()
+  const port = apiPort ?? await startInternalServer()
+  apiPort = port
 
   const openTrustedExternalUrl = async (url) => {
     if (!isTrustedExternalUrl(url)) {
@@ -68,8 +131,8 @@ async function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 820,
-    minWidth: 980,
-    minHeight: 700,
+    minWidth: 760,
+    minHeight: 600,
     backgroundColor: '#05070a',
     autoHideMenuBar: true,
     show: false,
@@ -78,6 +141,7 @@ async function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      preload: path.join(__dirname, 'preload.cjs'),
     },
   })
 
@@ -99,7 +163,32 @@ async function createWindow() {
     mainWindow.show()
   })
 
+  mainWindow.on('close', (event) => {
+    if (quitting || !libraryService) return
+    event.preventDefault()
+    if (closePending) return
+    closePending = true
+    void libraryService.read().then((state) => {
+      interfaceLanguage = state.settings['dealrift-language'] ?? 'en'
+      if (state.settings['dealrift-background'] === 'true') {
+        ensureTray()
+        mainWindow.hide()
+      } else {
+        quitting = true
+        app.quit()
+      }
+    }).catch(() => {
+      quitting = true
+      app.quit()
+    }).finally(() => { closePending = false })
+  })
+
   await mainWindow.loadURL(`http://127.0.0.1:${port}`)
+  if (!checkTimer) {
+    checkTimer = setInterval(() => { void checkWatchedGames() }, 5 * 60 * 1000)
+    notificationTimer = setInterval(() => { void deliverNotifications().catch(() => undefined) }, 30 * 1000)
+    void checkWatchedGames()
+  }
 }
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
@@ -108,9 +197,7 @@ if (!hasSingleInstanceLock) {
   app.quit()
 } else {
   app.on('second-instance', () => {
-    if (!mainWindow) return
-    if (mainWindow.isMinimized()) mainWindow.restore()
-    mainWindow.focus()
+    showWindow()
   })
 
   app.whenReady().then(createWindow).catch((error) => {
@@ -132,5 +219,9 @@ app.on('activate', () => {
 })
 
 app.on('before-quit', () => {
+  quitting = true
+  clearInterval(checkTimer)
+  clearInterval(notificationTimer)
+  tray?.destroy()
   apiServer?.close()
 })

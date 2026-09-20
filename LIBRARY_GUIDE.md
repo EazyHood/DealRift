@@ -1,0 +1,41 @@
+# Tu biblioteca en DealRift
+
+Abre **Mi biblioteca** para guardar juegos, marcar los que posees y asignar prioridad, notas y un precio objetivo. Los favoritos se conservan aunque cambies la búsqueda o cierres la aplicación. Un título sin precio verificado puede guardarse y comprobarse después.
+
+## Avisos de precio
+
+Activa seguimiento en cada juego y configura un objetivo en su moneda o en USD. Sin objetivo, DealRift registra la primera oferta verificada y nuevas bajadas. Con objetivo, registra la primera coincidencia, una bajada adicional o un nuevo cruce por debajo del objetivo. Los juegos poseídos no generan avisos.
+
+**Comprobar favoritos** actualiza hasta veinte juegos por pasada; las pasadas siguientes rotan por el resto de la lista. El seguimiento automático se realiza cada cinco minutos mientras la app está ejecutándose. En Windows, activa **Continuar en segundo plano** para ocultar la ventana en la bandeja al cerrarla; usa **Salir** en la bandeja para terminar la aplicación. El equipo debe permanecer encendido y conectado. En navegador, la pestaña debe permanecer abierta.
+
+Activa los avisos del sistema y concede el permiso del navegador cuando corresponda. El registro de alertas funciona también sin permiso. El horario de silencio usa la zona horaria del equipo y admite atravesar medianoche; sus hallazgos quedan en el registro y no se entregan todos de golpe al terminar el silencio.
+
+Sólo se usan ofertas recientes, vigentes, de bajo riesgo y del país seleccionado. Un cambio de país obliga a comprobar de nuevo los precios; no se presentan precios estadounidenses como precios locales. La pestaña general de señales explora la búsqueda actual; las notificaciones persistentes se configuran en la biblioteca.
+
+## Importar y exportar
+
+Se admiten hasta 500 juegos y archivos de hasta 2 MiB. Un CSV puede tener estas columnas:
+
+```csv
+title,steamAppId,owned,watched,priority,targetAmount,targetCurrency,notes
+The Witcher 3: Wild Hunt,292030,false,true,1,10,USD,Esperar una oferta
+Portal 2,620,true,false,2,,,Ya lo tengo
+```
+
+Sólo `title` es obligatorio. `owned` y `watched` aceptan `true`/`false`; prioridad 1 es la más alta. El importe usa punto decimal sin separadores de miles. JSON admite un array de títulos, un array de juegos o un objeto con `games`. La vista previa muestra los juegos antes de aplicar la importación; las ediciones con títulos diferentes permanecen separadas.
+
+**Exportar copia** descarga el estado local en JSON. **Importar** permite combinar juegos o restaurar una copia completa tras marcar la confirmación. Restaurar sustituye biblioteca, ajustes y registro; vuelve a comprobar precios antes de tomar decisiones. Los precios de una copia se conservan como referencia sin verificar, nunca como ofertas nuevas.
+
+La app portable guarda los archivos en `%APPDATA%\DealRift\data` mediante el directorio `userData` de Electron; no junto al `.exe`. En desarrollo se usa `data/`, o `DEALRIFT_DATA_DIR` si está definido. Si `library.json` se daña, DealRift informa del error y conserva el archivo: cierra la app, guarda una copia del archivo dañado y restaura tu última copia válida. No borres datos sin guardarlos primero.
+
+La migración de preferencias antiguas sólo puede recuperar el `localStorage` accesible en el origen actual. Las versiones anteriores usaban puertos variables; sus preferencias de otros orígenes no se recuperan automáticamente.
+
+## Historial, ediciones y presupuesto
+
+La ficha muestra el mínimo que DealRift ha observado para ese juego y país. No equivale al mínimo histórico de todo el mercado. Al empezar puede haber uno o ningún punto; hace falta seguir recopilando observaciones.
+
+El comparador permite seleccionar ediciones y consultar ofertas, fechas, país y enlaces. Si el proveedor no entrega información verificable de DLC o contenido incluido, se indica como desconocida. Revisa el contenido y la activación regional en la tienda antes de comprar.
+
+El plan de compra toma favoritos no poseídos con ofertas verificadas, ordena por prioridad y después por precio, y respeta el presupuesto en la moneda elegida. Explica las exclusiones y no garantiza la combinación matemática óptima. No compra ni modifica cuentas de tiendas.
+
+En **Preferencias**, el modo de bajo consumo desactiva el fondo animado y puedes ocultar juegos poseídos. El menú de actualizaciones abre las releases oficiales; todavía no hay actualización automática ni firma digital del ejecutable.

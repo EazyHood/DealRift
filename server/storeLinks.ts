@@ -34,10 +34,26 @@ function hasTrustedHost(hostname: string) {
 export function isTrustedStoreUrl(value: string) {
   try {
     const url = new URL(value)
-    return url.protocol === 'https:' && !url.username && !url.password && hasTrustedHost(url.hostname)
+    if (url.protocol !== 'https:' || url.username || url.password || url.port) return false
+    if (url.hostname === 'www.cheapshark.com') {
+      const keys = Array.from(url.searchParams.keys())
+      const dealId = url.searchParams.get('dealID') ?? ''
+      return url.pathname === '/redirect' && !url.hash && keys.length === 1 && keys[0] === 'dealID'
+        && /^[A-Za-z0-9+/=_-]{1,256}$/.test(dealId)
+    }
+    return hasTrustedHost(url.hostname)
   } catch {
     return false
   }
+}
+
+export function cheapSharkDealUrl(dealId: string) {
+  // The API returns an already URL-encoded identifier; normalize before encoding once.
+  let normalized: string
+  try { normalized = decodeURIComponent(dealId) } catch { throw new Error('Invalid CheapShark deal identifier.') }
+  const url = `https://www.cheapshark.com/redirect?dealID=${encodeURIComponent(normalized)}`
+  if (!isTrustedStoreUrl(url)) throw new Error('Invalid CheapShark deal identifier.')
+  return url
 }
 
 export function trustedStoreUrl(candidate: string | undefined, fallback: string) {

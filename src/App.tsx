@@ -48,7 +48,13 @@ import {
   YAxis,
 } from 'recharts'
 import './App.css'
+import './compact.css'
 import { RadarCanvas } from './components/RadarCanvas'
+import { LibraryPanel } from './components/LibraryPanel'
+import { GameDetail } from './components/GameDetail'
+import { readSetting, usePersonalLibrary } from './lib/personalLibrary'
+import { offerExclusion } from './lib/planner'
+import { libraryGameId, type LibraryState, type LibraryAction } from './shared/libraryTypes'
 import { useCopy } from './lib/i18n'
 import { fetchHistory, fetchRadar, fetchRegionalScan, type RadarParams } from './lib/radarApi'
 import type {
@@ -64,7 +70,7 @@ import type {
 } from './shared/dealTypes'
 
 type SourceFilter = 'all' | SourceKind
-type DashboardView = 'deals' | 'regions' | 'alerts' | 'analytics' | 'sources'
+type DashboardView = 'deals' | 'library' | 'regions' | 'alerts' | 'analytics' | 'sources'
 
 const countries = [
   { code: 'US', es: 'Estados Unidos', en: 'United States' },
@@ -96,21 +102,6 @@ const countries = [
 const sourceFilters: SourceFilter[] = ['all', 'official', 'authorized', 'freebie', 'regional', 'marketplace']
 const sortModes: SortMode[] = ['value', 'price', 'savings', 'regional', 'rating', 'ending', 'signal']
 const pageSizeOptions = [10, 20, 30, 40]
-
-function readSetting(key: string, fallback: string) {
-  if (typeof localStorage === 'undefined') return fallback
-  return localStorage.getItem(key) ?? fallback
-}
-
-function readJsonSetting<T>(key: string, fallback: T) {
-  if (typeof localStorage === 'undefined') return fallback
-  try {
-    const raw = localStorage.getItem(key)
-    return raw ? (JSON.parse(raw) as T) : fallback
-  } catch {
-    return fallback
-  }
-}
 
 function readPageSizeSetting() {
   const value = Number(readSetting('dealrift-page-size', '10'))
@@ -209,7 +200,9 @@ function linkHost(url: string) {
 
 function csvCell(value: unknown) {
   const text = String(value ?? '')
-  return `"${text.replaceAll('"', '""')}"`
+  // Treat provider text as data when spreadsheets open the export.
+  const safe = /^[\s]*[=+@-]/.test(text) ? `'${text}` : text
+  return `"${safe.replaceAll('"', '""')}"`
 }
 
 function downloadDealsCsv(deals: Deal[]) {
@@ -381,7 +374,13 @@ function useHistoryData(refreshKey: string | undefined) {
   return history
 }
 
-function App() {
+function App({ initialLibrary }: { initialLibrary: LibraryState }) {
+  const personal = usePersonalLibrary(initialLibrary)
+  const saveSettings = personal.saveSettings
+  const [detailDeal, setDetailDeal] = useState<Deal | null>(null)
+  const watchlist = useMemo(() => personal.state.games.filter((game) => game.watched).map((game) => game.id), [personal.state.games])
+  const ownedIds = useMemo(() => new Set(personal.state.games.filter((game) => game.owned).map((game) => game.id)), [personal.state.games])
+  const hideOwned = personal.state.settings['dealrift-hide-owned'] === 'true'
   const [language, setLanguage] = useState<Language>(() =>
     readSetting('dealrift-language', navigator.language.toLowerCase().startsWith('es') ? 'es' : 'en') as Language,
   )
@@ -408,20 +407,17 @@ function App() {
   const [onlyExceptional, setOnlyExceptional] = useState(() => readSetting('dealrift-only-exceptional', 'false') === 'true')
   const [showHighRisk, setShowHighRisk] = useState(false)
   const [autoRefresh, setAutoRefresh] = useState(true)
-  const [notificationReady, setNotificationReady] = useState(
-    () => typeof Notification !== 'undefined' && Notification.permission === 'granted',
-  )
+  const [notificationPermission, setNotificationPermission] = useState(() => typeof Notification !== 'undefined' && Notification.permission === 'granted')
+  const notificationReady = personal.state.settings['dealrift-notifications'] === 'true' && (Boolean(window.dealriftDesktop?.isDesktop) || notificationPermission)
   const [selectedScanId, setSelectedScanId] = useState('')
   const [manualScan, setManualScan] = useState<RegionalScan | null>(null)
   const [scanLoadingId, setScanLoadingId] = useState('')
   const [regionError, setRegionError] = useState('')
-  const [watchlist, setWatchlist] = useState<string[]>(() => readJsonSetting<string[]>('dealrift-watchlist', []))
   const [alertSavings, setAlertSavings] = useState(() => Number(readSetting('dealrift-alert-savings', '80')))
   const [alertSignal, setAlertSignal] = useState(() => Number(readSetting('dealrift-alert-signal', '90')))
   const [alertFree, setAlertFree] = useState(() => readSetting('dealrift-alert-free', 'true') === 'true')
   const [now, setNow] = useState(Date.now)
   const searchInputRef = useRef<HTMLInputElement>(null)
-  const notifiedRef = useRef(readSetting('dealrift-last-notification', ''))
   const online = useOnlineStatus()
 
   const t = useCopy(language)
@@ -433,7 +429,7 @@ function App() {
       locale,
       limit: 120,
       minSavings,
-      search: submittedQuery || undefined,
+      search: /^(steam|gog|epic|epic games store|humble|humble store|greenmangaming|fanatical|ubisoft|uplay)$/i.test(submittedQuery) ? undefined : submittedQuery || undefined,
       regionSample: 5,
     }),
     [country, locale, minSavings, submittedQuery],
@@ -461,25 +457,26 @@ function App() {
 
   useEffect(() => {
     document.documentElement.lang = language
-    localStorage.setItem('dealrift-language', language)
-    localStorage.setItem('dealrift-country', country)
-    localStorage.setItem('dealrift-min-savings', String(minSavings))
-    localStorage.setItem('dealrift-watchlist', JSON.stringify(watchlist))
-    localStorage.setItem('dealrift-alert-savings', String(alertSavings))
-    localStorage.setItem('dealrift-alert-signal', String(alertSignal))
-    localStorage.setItem('dealrift-alert-free', String(alertFree))
-    localStorage.setItem('dealrift-sort-mode', sortMode)
-    localStorage.setItem('dealrift-page-size', String(pageSize))
-    localStorage.setItem('dealrift-compact-mode', String(compactMode))
-    localStorage.setItem('dealrift-max-price', String(maxPrice))
-    localStorage.setItem('dealrift-min-rating', String(minRating))
-    localStorage.setItem('dealrift-only-free', String(onlyFree))
-    localStorage.setItem('dealrift-only-regional', String(onlyRegional))
-    localStorage.setItem('dealrift-only-watched', String(onlyWatched))
-    localStorage.setItem('dealrift-only-ending-soon', String(onlyEndingSoon))
-    localStorage.setItem('dealrift-only-deep-discount', String(onlyDeepDiscount))
-    localStorage.setItem('dealrift-only-low-risk', String(onlyLowRisk))
-    localStorage.setItem('dealrift-only-exceptional', String(onlyExceptional))
+    void saveSettings({
+      'dealrift-language': String(language),
+      'dealrift-country': String(country),
+      'dealrift-min-savings': String(minSavings),
+      'dealrift-alert-savings': String(alertSavings),
+      'dealrift-alert-signal': String(alertSignal),
+      'dealrift-alert-free': String(alertFree),
+      'dealrift-sort-mode': String(sortMode),
+      'dealrift-page-size': String(pageSize),
+      'dealrift-compact-mode': String(compactMode),
+      'dealrift-max-price': String(maxPrice),
+      'dealrift-min-rating': String(minRating),
+      'dealrift-only-free': String(onlyFree),
+      'dealrift-only-regional': String(onlyRegional),
+      'dealrift-only-watched': String(onlyWatched),
+      'dealrift-only-ending-soon': String(onlyEndingSoon),
+      'dealrift-only-deep-discount': String(onlyDeepDiscount),
+      'dealrift-only-low-risk': String(onlyLowRisk),
+      'dealrift-only-exceptional': String(onlyExceptional),
+    }).catch(() => {})
   }, [
     alertFree,
     alertSavings,
@@ -499,7 +496,7 @@ function App() {
     onlyWatched,
     pageSize,
     sortMode,
-    watchlist,
+    saveSettings,
   ])
 
   useEffect(() => {
@@ -508,11 +505,11 @@ function App() {
   }, [data, selectedScanId])
 
   const allScans = useMemo(() => {
-    const scans = data?.regionalScans ?? []
-    if (!manualScan) return scans
+    const scans = data?.country === country ? data.regionalScans : []
+    if (!manualScan || manualScan.baselineCountry !== country) return scans
     const withoutDuplicate = scans.filter((scan) => scan.appId !== manualScan.appId)
     return [manualScan, ...withoutDuplicate]
-  }, [data, manualScan])
+  }, [data, manualScan, country])
 
   const selectedScan = useMemo(
     () => allScans.find((scan) => scan.appId === selectedScanId) ?? allScans[0],
@@ -522,9 +519,11 @@ function App() {
   const deals = useMemo(() => {
     const source = data?.deals ?? []
     const normalizedQuery = submittedQuery.trim().toLowerCase()
+    const appIdQuery = /^(?:steam:)?(\d{1,10})$/.exec(normalizedQuery)?.[1]
     const filtered = source.filter((deal) => {
       const searchOk =
         !normalizedQuery ||
+        (Boolean(appIdQuery) && deal.steamAppId === appIdQuery) ||
         deal.title.toLowerCase().includes(normalizedQuery) ||
         deal.source.toLowerCase().includes(normalizedQuery) ||
         deal.platform.toLowerCase().includes(normalizedQuery) ||
@@ -539,15 +538,17 @@ function App() {
       const ratingOk = minRating <= 0 || dealRating(deal) >= minRating
       const freeOk = !onlyFree || deal.isFree
       const regionalOk = !onlyRegional || Boolean(deal.bestRegion)
-      const watchedOk = !onlyWatched || watchlist.includes(deal.title)
+      const watchedOk = !onlyWatched || watchlist.includes(libraryGameId(deal))
       const endingOk = !onlyEndingSoon || isEndingSoon(deal)
       const deepDiscountOk = !onlyDeepDiscount || deal.savingsPercent >= 80
       const lowRiskOk = !onlyLowRisk || deal.riskLevel === 'low'
       const exceptionalOk = !onlyExceptional || deal.intelligence?.verdict === 'exceptional'
-      return searchOk && sourceOk && storeOk && riskOk && priceOk && ratingOk && freeOk && regionalOk && watchedOk && endingOk && deepDiscountOk && lowRiskOk && exceptionalOk
+      return (!hideOwned || !ownedIds.has(libraryGameId(deal))) && searchOk && sourceOk && storeOk && riskOk && priceOk && ratingOk && freeOk && regionalOk && watchedOk && endingOk && deepDiscountOk && lowRiskOk && exceptionalOk
     })
 
     return [...filtered].sort((a, b) => {
+      const eligibility = Number(Boolean(offerExclusion(a, country, 'USD', now))) - Number(Boolean(offerExclusion(b, country, 'USD', now)))
+      if (eligibility) return eligibility
       if (sortMode === 'price') return dealUsd(a) - dealUsd(b) || b.savingsPercent - a.savingsPercent || intelligenceScore(b) - intelligenceScore(a)
       if (sortMode === 'savings') return b.savingsPercent - a.savingsPercent || dealUsd(a) - dealUsd(b)
       if (sortMode === 'regional') return regionalStrength(b) - regionalStrength(a) || dealUsd(a) - dealUsd(b)
@@ -556,7 +557,7 @@ function App() {
       if (sortMode === 'signal') return intelligenceScore(b) - intelligenceScore(a) || dealUsd(a) - dealUsd(b)
       return valueScore(b) - valueScore(a) || dealUsd(a) - dealUsd(b)
     })
-  }, [data, maxPrice, minRating, onlyDeepDiscount, onlyEndingSoon, onlyExceptional, onlyFree, onlyLowRisk, onlyRegional, onlyWatched, selectedStore, showHighRisk, sortMode, sourceFilter, submittedQuery, watchlist])
+  }, [data, country, now, maxPrice, minRating, onlyDeepDiscount, onlyEndingSoon, onlyExceptional, onlyFree, onlyLowRisk, onlyRegional, onlyWatched, selectedStore, showHighRisk, sortMode, sourceFilter, submittedQuery, watchlist, ownedIds, hideOwned])
 
   const storeOptions = useMemo(() => {
     const counts = new Map<string, number>()
@@ -583,7 +584,7 @@ function App() {
   }, [data])
 
   const dealHighlights = useMemo(() => {
-    const pool = deals
+    const pool = deals.filter((deal) => !offerExclusion(deal, country, 'USD'))
     const paid = pool.filter((deal) => !deal.isFree && dealUsd(deal) > 0)
     const endingSoon = pool.filter(isEndingSoon).sort((a, b) => endingSoonScore(a) - endingSoonScore(b))[0]
 
@@ -596,7 +597,7 @@ function App() {
     ].filter((deal): deal is Deal => Boolean(deal))
 
     return candidates.filter((deal, index) => candidates.findIndex((item) => item.id === deal.id) === index).slice(0, 4)
-  }, [deals])
+  }, [deals, country])
 
   const activeFilterLabels = useMemo(
     () =>
@@ -623,11 +624,12 @@ function App() {
   const filteredMetrics = useMemo(
     () => ({
       total: deals.length,
-      free: deals.filter((deal) => deal.isFree).length,
-      maxSavings: deals.reduce((highest, deal) => Math.max(highest, deal.savingsPercent), 0),
+      free: deals.filter((deal) => deal.isFree && !offerExclusion(deal, country, 'USD')).length,
+      upcoming: deals.filter((deal) => deal.availability === 'upcoming' && !deal.freshness?.stale && deal.priceCountry === country).length,
+      maxSavings: deals.filter((deal) => !offerExclusion(deal, country, 'USD')).reduce((highest, deal) => Math.max(highest, deal.savingsPercent), 0),
       regions: deals.filter((deal) => Boolean(deal.bestRegion)).length,
     }),
-    [deals],
+    [deals, country],
   )
 
   const totalPages = Math.max(1, Math.ceil(deals.length / pageSize))
@@ -696,45 +698,40 @@ function App() {
     [selectedScan],
   )
 
-  const watchedDeals = useMemo(() => {
-    if (!watchlist.length) return []
-    const watched = new Set(watchlist)
-    return (data?.deals ?? []).filter((deal) => watched.has(deal.title))
-  }, [data, watchlist])
+  const watchedDeals = useMemo(() => personal.state.games
+    .filter((game) => game.watched && game.snapshot)
+    .map((game) => game.snapshot!), [personal.state.games])
 
   const alertMatches = useMemo(
     () =>
       (data?.deals ?? [])
         .filter((deal) => {
-          const watched = watchlist.includes(deal.title)
+          const watched = watchlist.includes(libraryGameId(deal))
           const matchesRule = watched || intelligenceScore(deal) >= alertSignal || deal.savingsPercent >= alertSavings || (alertFree && deal.isFree)
-          return deal.riskLevel !== 'high' && matchesRule
+          return deal.riskLevel !== 'high' && deal.confidence !== 'fallback' && !deal.freshness?.stale &&
+            deal.availability !== 'upcoming' && deal.availability !== 'expired' &&
+            (!deal.startsAt || Date.parse(deal.startsAt) <= now) && (!deal.expiresAt || Date.parse(deal.expiresAt) > now) &&
+            (!deal.priceCountry || deal.priceCountry === country) && matchesRule
         })
-        .sort((a, b) => Number(watchlist.includes(b.title)) - Number(watchlist.includes(a.title)) || intelligenceScore(b) - intelligenceScore(a))
+        .sort((a, b) => Number(watchlist.includes(libraryGameId(b))) - Number(watchlist.includes(libraryGameId(a))) || intelligenceScore(b) - intelligenceScore(a))
         .slice(0, 8),
-    [alertFree, alertSavings, alertSignal, data, watchlist],
+    [alertFree, alertSavings, alertSignal, data, watchlist, country, now],
   )
 
-  useEffect(() => {
-    if (!notificationReady || typeof Notification === 'undefined' || !data?.deals.length) return
-    const hotDeal = alertMatches[0]
-    if (!hotDeal || notifiedRef.current === hotDeal.id) return
-    notifiedRef.current = hotDeal.id
-    localStorage.setItem('dealrift-last-notification', hotDeal.id)
-    const notification = new Notification('DealRift', {
-      body: `${hotDeal.title} - ${hotDeal.isFree ? t('freePrice') : hotDeal.salePrice.formatted} - ${hotDeal.source}`,
-      tag: hotDeal.id,
-    })
-    notification.onclick = () => {
-      window.open(hotDeal.url, '_blank', 'noopener,noreferrer')
-      notification.close()
-    }
-  }, [alertMatches, data, notificationReady, t])
-
   const enableNotifications = async () => {
+    if (window.dealriftDesktop?.isDesktop) {
+      await personal.action({ action: 'settings', settings: { 'dealrift-notifications': 'true' } }).catch(() => {})
+      return
+    }
     if (typeof Notification === 'undefined') return
     const permission = await Notification.requestPermission()
-    setNotificationReady(permission === 'granted')
+    setNotificationPermission(permission === 'granted')
+    await personal.action({ action: 'settings', settings: { 'dealrift-notifications': String(permission === 'granted') } }).catch(() => {})
+  }
+
+  const libraryAction = async (action: LibraryAction) => {
+    await personal.action(action)
+    if (action.action === 'restore') window.location.reload()
   }
 
   const submitSearch = (event: React.FormEvent) => {
@@ -765,9 +762,12 @@ function App() {
   }
 
   const toggleWatch = (deal: Deal) => {
-    setWatchlist((current) =>
-      current.includes(deal.title) ? current.filter((title) => title !== deal.title) : [deal.title, ...current].slice(0, 20),
-    )
+    const id = libraryGameId(deal)
+    const existing = personal.state.games.find((game) => game.id === id)
+    void personal.action({ action: 'upsert', game: {
+      id, title: deal.title, steamAppId: deal.steamAppId, owned: false, priority: 2, notes: '',
+      ...existing, watched: !existing?.watched, snapshot: deal, updatedAt: new Date().toISOString(),
+    } }).catch(() => {})
   }
 
   const resetOfferFilters = () => {
@@ -795,12 +795,14 @@ function App() {
   const dataIsStale = Boolean(
     data && now - new Date(data.updatedAt).getTime() > Math.max(60, data.refreshSeconds * 2) * 1000,
   )
-  const connectionTone = !online ? 'offline' : error || dataIsStale ? 'stale' : 'live'
-  const connectionLabel = !online ? t('offline') : error || dataIsStale ? t('dataStale') : t('online')
+  const sourcesDegraded = Boolean(data?.sourceStatus.some((source) => !source.ok))
+  const connectionTone = !online ? 'offline' : error || dataIsStale || sourcesDegraded ? 'stale' : 'live'
+  const connectionLabel = !online ? t('offline') : error || dataIsStale ? t('dataStale') : sourcesDegraded ? t('partialData') : t('online')
 
   const pulse = data?.metrics.totalDeals ?? 20
   const dashboardTabs = [
     { id: 'deals', icon: <Zap size={18} />, label: t('viewDeals'), meta: `${deals.length}` },
+    { id: 'library', icon: <Gamepad2 size={18} />, label: t('personalLibrary'), meta: String(personal.state.games.length) },
     { id: 'regions', icon: <MapPin size={18} />, label: t('viewRegions'), meta: String(allScans.length) },
     { id: 'alerts', icon: <BellRing size={18} />, label: t('viewAlerts'), meta: String(alertMatches.length) },
     { id: 'analytics', icon: <BarChart3 size={18} />, label: t('viewAnalytics'), meta: String(history.length) },
@@ -808,8 +810,9 @@ function App() {
   ] satisfies Array<{ id: DashboardView; icon: React.ReactNode; label: string; meta: string }>
 
   return (
+    <>
+      <RadarCanvas pulse={pulse} enabled={personal.state.settings['dealrift-low-power'] !== 'true'} />
     <main className="app-shell">
-      <RadarCanvas pulse={pulse} />
       <header className="topbar">
         <div className="brand-lockup">
           <div className="brand-mark">
@@ -833,7 +836,7 @@ function App() {
             <RefreshCw size={18} className={loading ? 'spin' : ''} />
             <span>{t('refresh')}</span>
           </button>
-          <button type="button" className={`icon-text ${autoRefresh ? 'is-on' : ''}`} onClick={() => setAutoRefresh((value) => !value)}>
+          <button type="button" className={`icon-text ${autoRefresh ? 'is-on' : ''}`} aria-pressed={autoRefresh} onClick={() => setAutoRefresh((value) => !value)}>
             <Clock3 size={18} />
             <span>{t('autoRefresh')}</span>
           </button>
@@ -857,6 +860,7 @@ function App() {
             onKeyDown={(event) => {
               if (event.key === 'Escape' && (query || submittedQuery)) clearSearch()
             }}
+            aria-label={t('search')}
             placeholder={t('searchPlaceholder')}
           />
           {query || submittedQuery ? (
@@ -889,6 +893,7 @@ function App() {
       <section className="metric-grid">
         <Metric icon={<Gamepad2 size={22} />} label={t('totalDeals')} value={String(filteredMetrics.total)} />
         <Metric icon={<Gift size={22} />} label={t('freeGames')} value={String(filteredMetrics.free)} tone="green" />
+        <Metric icon={<Clock3 size={22} />} label={t('upcomingGames')} value={String(filteredMetrics.upcoming)} />
         <Metric icon={<TrendingDown size={22} />} label={t('maxSavings')} value={formatPercent(filteredMetrics.maxSavings)} tone="pink" />
         <Metric icon={<MapPin size={22} />} label={t('regionFinds')} value={String(filteredMetrics.regions)} tone="amber" />
       </section>
@@ -899,6 +904,7 @@ function App() {
             key={view.id}
             type="button"
             className={activeView === view.id ? 'active' : ''}
+            aria-pressed={activeView === view.id}
             onClick={() => setActiveView(view.id)}
           >
             <span className="view-tab-icon">{view.icon}</span>
@@ -911,29 +917,35 @@ function App() {
       </nav>
 
       {error ? (
-        <div className="error-line">
+        <div className="error-line" role="alert">
           <AlertTriangle size={18} />
           <span>{error}</span>
           <button type="button" onClick={refresh}><RefreshCw size={15} />{t('retry')}</button>
         </div>
       ) : null}
 
+      {personal.error ? <div className="error-line" role="alert"><AlertTriangle size={18} /><span>{t('librarySaveFailed')} {personal.error}</span></div> : null}
+      {sourcesDegraded ? <div className="source-warning" role="status"><AlertTriangle size={16} /><span>{t('partialDataNotice')}</span><button type="button" onClick={() => setActiveView('sources')}>{t('viewSources')}</button></div> : null}
+      {activeView === 'library' ? <LibraryPanel state={personal.state} language={language} country={country} deals={data?.deals ?? []}
+        busy={personal.busy} error={personal.error} onAction={libraryAction} onCheck={personal.check} onOpenGame={setDetailDeal} /> : null}
+
       {activeView === 'deals' ? (
         <section className={`view-panel deals-view ${compactMode ? 'compact-mode' : ''}`}>
           <div className="deal-toolbar">
             <section className="filter-strip">
-              <div className="segmented" aria-label={t('source')}>
+              {showAdvancedFilters ? <div className="segmented" aria-label={t('source')}>
                 {sourceFilters.map((filter) => (
                   <button
                     key={filter}
                     type="button"
                     className={sourceFilter === filter ? 'active' : ''}
+                    aria-pressed={sourceFilter === filter}
                     onClick={() => setSourceFilter(filter)}
                   >
                     {filter === 'all' ? t('all') : filter === 'freebie' ? t('freebies') : filter === 'marketplace' ? t('marketplaces') : t(filter)}
                   </button>
                 ))}
-              </div>
+              </div> : null}
 
               <div className="filter-actions">
                 <label className="compact-select">
@@ -965,12 +977,12 @@ function App() {
                   <span>{t('of')} {deals.length}</span>
                 </div>
 
-                <button type="button" className={`filter-toggle ${showAdvancedFilters ? 'active' : ''}`} onClick={() => setShowAdvancedFilters((value) => !value)}>
+                <button type="button" className={`filter-toggle ${showAdvancedFilters ? 'active' : ''}`} aria-expanded={showAdvancedFilters} onClick={() => setShowAdvancedFilters((value) => !value)}>
                   <SlidersHorizontal size={16} />
                   <span>{showAdvancedFilters ? t('hideFilters') : t('moreFilters')}</span>
                 </button>
 
-                <button type="button" className={`filter-toggle ${compactMode ? 'active' : ''}`} onClick={() => setCompactMode((value) => !value)}>
+                <button type="button" className={`filter-toggle ${compactMode ? 'active' : ''}`} aria-pressed={compactMode} onClick={() => setCompactMode((value) => !value)}>
                   <Gamepad2 size={16} />
                   <span>{t('compactMode')}</span>
                 </button>
@@ -1023,7 +1035,7 @@ function App() {
               </div>
             </section>
 
-            {dealHighlights.length ? <DealHighlights deals={dealHighlights} t={t} /> : null}
+            {showAdvancedFilters && dealHighlights.length ? <DealHighlights deals={dealHighlights} t={t} /> : null}
 
             {showAdvancedFilters ? (
               <section className="advanced-filters">
@@ -1091,11 +1103,13 @@ function App() {
                     key={deal.id}
                     deal={deal}
                     index={(currentPage - 1) * pageSize + index}
-                    isWatched={watchlist.includes(deal.title)}
+                    isWatched={watchlist.includes(libraryGameId(deal))}
                     isScanning={scanLoadingId === deal.id}
                     alternatives={(alternativesByGame.get(frontendGameKey(deal)) ?? []).filter((alternative) => alternative.id !== deal.id).slice(0, 3)}
                     onRegionScan={scanDealRegions}
                     onToggleWatch={toggleWatch}
+                    onOpenDetail={setDetailDeal}
+                    country={country}
                     t={t}
                   />
                 ))
@@ -1158,6 +1172,8 @@ function App() {
         <section className="view-panel alert-layout">
           <section className="tool-panel">
             <SectionTitle icon={<BellRing size={18} />} label={t('alertCenter')} meta={`${alertMatches.length} ${t('hotNow')}`} />
+            <p className="personal-help">{language === 'es' ? 'Estas señales exploran la búsqueda actual. Configura avisos persistentes y precios objetivo en Mi biblioteca.' : 'These signals explore the current search. Set persistent notifications and target prices in My library.'}</p>
+            <button type="button" className="ghost-button" onClick={() => setActiveView('library')}>{t('personalLibrary')}</button>
             <div className="alert-controls">
               <label>
                 <span>{t('alertSavings')}: {alertSavings}%</span>
@@ -1266,7 +1282,10 @@ function App() {
           </section>
         </section>
       ) : null}
+      {detailDeal ? <GameDetail deal={detailDeal} offers={data?.deals ?? []} language={language} country={country}
+        onClose={() => setDetailDeal(null)} onWatch={toggleWatch} watched={watchlist.includes(libraryGameId(detailDeal))} /> : null}
     </main>
+    </>
   )
 }
 
@@ -1379,7 +1398,7 @@ function IntelligencePanel({ deal, alternatives, t }: IntelligencePanelProps) {
         </div>
         <div>
           <span>{t('confidence')}</span>
-          <strong>{intelligence.confidenceScore}%</strong>
+          <strong>{intelligence.confidenceScore >= 80 ? t('evidenceStrong') : intelligence.confidenceScore >= 50 ? t('evidencePartial') : t('evidenceLimited')}</strong>
           <small>{intelligence.history.wasEverFree ? t('wasFreeBefore') : intelligence.flags.searchDestination ? t('storeSearch') : t('directLink')}</small>
         </div>
       </div>
@@ -1416,25 +1435,28 @@ function IntelligencePanel({ deal, alternatives, t }: IntelligencePanelProps) {
 }
 
 interface DealRowProps {
+  country: string
   deal: Deal
   index: number
   isWatched: boolean
   isScanning: boolean
   alternatives: Deal[]
+  onOpenDetail: (deal: Deal) => void
   onRegionScan: (deal: Deal) => void
   onToggleWatch: (deal: Deal) => void
   t: ReturnType<typeof useCopy>
 }
 
-function DealRow({ deal, index, isWatched, isScanning, alternatives, onRegionScan, onToggleWatch, t }: DealRowProps) {
+function DealRow({ deal, country, index, isWatched, isScanning, alternatives, onRegionScan, onToggleWatch, onOpenDetail, t }: DealRowProps) {
   const [expanded, setExpanded] = useState(false)
   const [copied, setCopied] = useState(false)
   const hasRegion = !deal.isFree && Boolean(deal.bestRegion && deal.bestRegion.usd < dealUsd(deal) * 0.98)
-  const nextDate = deal.expiresAt ?? deal.startsAt
+  const upcoming = deal.availability === 'upcoming' || Boolean(deal.startsAt && Date.parse(deal.startsAt) > Date.now())
+  const nextDate = upcoming ? deal.startsAt : deal.expiresAt
   const timeLeft = formatTimeLeft(nextDate)
   const normalizedUsd = deal.salePrice.usd
   const showUsd = !deal.isFree && deal.salePrice.currency !== 'USD' && typeof normalizedUsd === 'number'
-  const priceNow = deal.isFree ? t('freePrice') : deal.salePrice.formatted
+  const priceNow = upcoming ? t('upcomingFree') : deal.isFree ? t('freePrice') : deal.salePrice.formatted
   const directLink = !deal.tags.includes('store-search-link') && deal.confidence !== 'search-link'
 
   const copyLink = async () => {
@@ -1461,7 +1483,7 @@ function DealRow({ deal, index, isWatched, isScanning, alternatives, onRegionSca
       <div className="deal-body">
         <div className="deal-heading">
           <div>
-            <h3>{deal.title}</h3>
+            <h3><button type="button" className="game-title-button" onClick={() => onOpenDetail(deal)}>{deal.title}</button></h3>
             <p>{deal.source} - {deal.platform}</p>
           </div>
           <div className="deal-status">
@@ -1472,6 +1494,8 @@ function DealRow({ deal, index, isWatched, isScanning, alternatives, onRegionSca
 
         <div className="deal-meta">
           <span className="price-now">{priceNow}</span>
+          {deal.freshness?.stale || deal.confidence === 'fallback' ? <span className="data-label">{t('cachedPrice')}</span> : null}
+          {deal.priceCountry && deal.priceCountry !== country ? <span className="data-label">{t('foreignPrice')}: {deal.priceCountry}</span> : null}
           {deal.normalPrice && !deal.isFree ? <span className="price-before">{deal.normalPrice.formatted}</span> : null}
           <span className="save-pill">{formatPercent(deal.savingsPercent)}</span>
           {deal.isFree ? <span className="free-pill">{deal.startsAt && new Date(deal.startsAt) > new Date() ? t('upcoming') : t('claimNow')}</span> : null}
@@ -1495,7 +1519,7 @@ function DealRow({ deal, index, isWatched, isScanning, alternatives, onRegionSca
           <motion.div className="deal-details" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}>
             <IntelligencePanel deal={deal} alternatives={alternatives} t={t} />
             <div className="deal-detail-head">
-              <span><ExternalLink size={13} />{directLink ? t('directLink') : t('storeSearch')} - {linkHost(deal.url)}</span>
+              <span><ExternalLink size={13} />{linkHost(deal.url) === 'www.cheapshark.com' ? t('providerRedirect') : directLink ? t('directLink') : t('storeSearch')} - {linkHost(deal.url)}</span>
               <span>{t('detectedAt')}: {formatTime(deal.detectedAt)}</span>
               {nextDate ? <span>{t('expiresAt')}: {formatTime(nextDate)}</span> : null}
             </div>
@@ -1529,11 +1553,12 @@ function DealRow({ deal, index, isWatched, isScanning, alternatives, onRegionSca
           {isWatched ? <EyeOff size={16} /> : <Eye size={16} />}
           <span>{isWatched ? t('watching') : t('watch')}</span>
         </button>
+        <button type="button" className="ghost-link" onClick={() => onOpenDetail(deal)}><BarChart3 size={16} /><span>{t('gameSheet')}</span></button>
         <div className="deal-action-icons">
           <button type="button" className={`ghost-link icon-action ${copied ? 'copied' : ''}`} onClick={copyLink} title={copied ? t('copiedLink') : t('copyLink')} aria-label={copied ? t('copiedLink') : t('copyLink')}>
             {copied ? <Check size={16} /> : <Copy size={16} />}
           </button>
-          <button type="button" className={`ghost-link icon-action ${expanded ? 'active' : ''}`} onClick={() => setExpanded((value) => !value)} title={expanded ? t('hideDetails') : t('details')} aria-label={expanded ? t('hideDetails') : t('details')}>
+          <button type="button" className={`ghost-link icon-action ${expanded ? 'active' : ''}`} aria-expanded={expanded} onClick={() => setExpanded((value) => !value)} title={expanded ? t('hideDetails') : t('details')} aria-label={expanded ? t('hideDetails') : t('details')}>
             <SlidersHorizontal size={16} />
           </button>
         </div>
