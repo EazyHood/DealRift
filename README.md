@@ -8,12 +8,16 @@
 [![CI](https://github.com/EazyHood/DealRift/actions/workflows/ci.yml/badge.svg)](https://github.com/EazyHood/DealRift/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/EazyHood/DealRift?include_prereleases&label=release)](https://github.com/EazyHood/DealRift/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-55e6c1.svg)](LICENSE)
-[![Windows x64](https://img.shields.io/badge/Windows-x64-2f80ed.svg)](https://github.com/EazyHood/DealRift/releases)
+[![Windows x64](https://img.shields.io/badge/Windows-x64-2f80ed.svg)](https://github.com/EazyHood/DealRift/releases/download/v1.1.1-beta.1/DealRift-1.1.1-beta.1-portable.exe)
 
-[Download](https://github.com/EazyHood/DealRift/releases) | [Report a bug](https://github.com/EazyHood/DealRift/issues/new/choose) | [Data sources](DATA_SOURCES.md) | [Privacy](PRIVACY.md)
+[![Descargar para Windows / Download for Windows (.exe)](https://img.shields.io/badge/Descargar_para_Windows-.exe_portable-2f80ed?style=for-the-badge&logo=windows)](https://github.com/EazyHood/DealRift/releases/download/v1.1.1-beta.1/DealRift-1.1.1-beta.1-portable.exe)
+
+**[Descargar .exe / Download .exe — v1.1.1-beta.1](https://github.com/EazyHood/DealRift/releases/download/v1.1.1-beta.1/DealRift-1.1.1-beta.1-portable.exe)**
+
+[SHA-256 checksum](https://github.com/EazyHood/DealRift/releases/download/v1.1.1-beta.1/SHA256SUMS.txt) | [Release notes](https://github.com/EazyHood/DealRift/releases/tag/v1.1.1-beta.1) | [All releases](https://github.com/EazyHood/DealRift/releases) | [Report a bug](https://github.com/EazyHood/DealRift/issues/new/choose) | [Data sources](DATA_SOURCES.md) | [Privacy](PRIVACY.md)
 </div>
 
-> **Resumen en espanol:** DealRift compara ofertas reales, juegos gratis y precios regionales desde una interfaz disponible en espanol e ingles. Descarga el `.exe` portable desde **Releases**; no requiere instalador, terminal ni Node.js.
+> **Resumen en espanol:** DealRift compara ofertas reales, juegos gratis y precios regionales desde una interfaz disponible en espanol e ingles. **[Descarga aqui el `.exe` portable para Windows x64](https://github.com/EazyHood/DealRift/releases/download/v1.1.1-beta.1/DealRift-1.1.1-beta.1-portable.exe)**; no requiere instalador, terminal ni Node.js. El boton verde **Code > Download ZIP** descarga el codigo fuente, no la aplicacion.
 
 ![DealRift desktop dashboard](screenshots/final-desktop.jpg)
 
@@ -21,9 +25,11 @@
 
 DealRift currently ships as a portable **Windows x64** application:
 
-1. Open [GitHub Releases](https://github.com/EazyHood/DealRift/releases).
-2. Download `DealRift-<version>-portable.exe` and `SHA256SUMS.txt` from the same release.
+1. **[Download DealRift-1.1.1-beta.1-portable.exe](https://github.com/EazyHood/DealRift/releases/download/v1.1.1-beta.1/DealRift-1.1.1-beta.1-portable.exe)** (about 98 MB).
+2. Download [SHA256SUMS.txt](https://github.com/EazyHood/DealRift/releases/download/v1.1.1-beta.1/SHA256SUMS.txt) from the same release.
 3. Run the executable directly. It starts the UI and its private local API without a visible console.
+
+If you prefer the release page, open [v1.1.1-beta.1](https://github.com/EazyHood/DealRift/releases/tag/v1.1.1-beta.1), expand **Assets**, and choose the `.exe`. The **Source code (zip/tar.gz)** files do not contain the built app. The download links above point to this beta explicitly because GitHub's `releases/latest` endpoint excludes pre-releases.
 
 The public beta is not code signed yet, so Windows SmartScreen can display an unknown-publisher warning. Download only from this repository and verify the checksum:
 
