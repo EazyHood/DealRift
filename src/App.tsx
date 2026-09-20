@@ -625,6 +625,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
     () => ({
       total: deals.length,
       free: deals.filter((deal) => deal.isFree && !offerExclusion(deal, country, 'USD')).length,
+      upcoming: deals.filter((deal) => deal.availability === 'upcoming' && !deal.freshness?.stale && deal.priceCountry === country).length,
       maxSavings: deals.filter((deal) => !offerExclusion(deal, country, 'USD')).reduce((highest, deal) => Math.max(highest, deal.savingsPercent), 0),
       regions: deals.filter((deal) => Boolean(deal.bestRegion)).length,
     }),
@@ -892,6 +893,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
       <section className="metric-grid">
         <Metric icon={<Gamepad2 size={22} />} label={t('totalDeals')} value={String(filteredMetrics.total)} />
         <Metric icon={<Gift size={22} />} label={t('freeGames')} value={String(filteredMetrics.free)} tone="green" />
+        <Metric icon={<Clock3 size={22} />} label={t('upcomingGames')} value={String(filteredMetrics.upcoming)} />
         <Metric icon={<TrendingDown size={22} />} label={t('maxSavings')} value={formatPercent(filteredMetrics.maxSavings)} tone="pink" />
         <Metric icon={<MapPin size={22} />} label={t('regionFinds')} value={String(filteredMetrics.regions)} tone="amber" />
       </section>
