@@ -54,11 +54,23 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $artifact = Get-ChildItem -LiteralPath release -Filter '*.exe' | Select-Object -First 1
+          $downloadBase = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:GITHUB_REF_NAME"
+          $notesPath = Join-Path $env:RUNNER_TEMP 'dealrift-release-notes.md'
+          @(
+            "## Descargar / Download"
+            ""
+            "**[Descargar para Windows / Download for Windows (.exe)]($downloadBase/$($artifact.Name))**"
+            ""
+            "[SHA256SUMS.txt]($downloadBase/SHA256SUMS.txt)"
+            ""
+            "Windows x64 portable. No installer or Node.js required. Source code archives do not contain the built application."
+          ) | Set-Content -LiteralPath $notesPath -Encoding utf8
           $arguments = @(
             'release', 'create', $env:GITHUB_REF_NAME,
             $artifact.FullName,
             (Resolve-Path release/SHA256SUMS.txt).Path,
             '--title', "DealRift $env:GITHUB_REF_NAME",
+            '--notes-file', $notesPath,
             '--generate-notes',
             '--verify-tag'
           )
