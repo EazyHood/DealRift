@@ -547,7 +547,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
     })
 
     return [...filtered].sort((a, b) => {
-      const eligibility = Number(Boolean(offerExclusion(a, country, 'USD'))) - Number(Boolean(offerExclusion(b, country, 'USD')))
+      const eligibility = Number(Boolean(offerExclusion(a, country, 'USD', now))) - Number(Boolean(offerExclusion(b, country, 'USD', now)))
       if (eligibility) return eligibility
       if (sortMode === 'price') return dealUsd(a) - dealUsd(b) || b.savingsPercent - a.savingsPercent || intelligenceScore(b) - intelligenceScore(a)
       if (sortMode === 'savings') return b.savingsPercent - a.savingsPercent || dealUsd(a) - dealUsd(b)
@@ -557,7 +557,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
       if (sortMode === 'signal') return intelligenceScore(b) - intelligenceScore(a) || dealUsd(a) - dealUsd(b)
       return valueScore(b) - valueScore(a) || dealUsd(a) - dealUsd(b)
     })
-  }, [data, country, maxPrice, minRating, onlyDeepDiscount, onlyEndingSoon, onlyExceptional, onlyFree, onlyLowRisk, onlyRegional, onlyWatched, selectedStore, showHighRisk, sortMode, sourceFilter, submittedQuery, watchlist, ownedIds, hideOwned])
+  }, [data, country, now, maxPrice, minRating, onlyDeepDiscount, onlyEndingSoon, onlyExceptional, onlyFree, onlyLowRisk, onlyRegional, onlyWatched, selectedStore, showHighRisk, sortMode, sourceFilter, submittedQuery, watchlist, ownedIds, hideOwned])
 
   const storeOptions = useMemo(() => {
     const counts = new Map<string, number>()
