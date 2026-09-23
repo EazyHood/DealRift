@@ -27,11 +27,12 @@ test('concurrent library actions merge atomically and survive a new service inst
   const options = { dataDir, queryRadar: async () => radar([]) }
   const library = createLibraryService(options)
   await Promise.all(Array.from({ length: 20 }, (_, index) => library.update({ action: 'upsert', game: game(`edition-${index}`) })))
-  await library.update({ action: 'settings', settings: { 'dealrift-language': 'es', 'dealrift-country': 'CO', 'dealrift-background': 'true' } })
+  await library.update({ action: 'settings', settings: { 'dealrift-language': 'es', 'dealrift-country': 'CO', 'dealrift-background': 'true', 'dealrift-price-scope': 'worldwide' } })
   const recovered = await createLibraryService(options).read()
   assert.equal(recovered.games.length, 20)
   assert.equal(recovered.revision, 21)
   assert.equal(recovered.settings['dealrift-country'], 'CO')
+  assert.equal(recovered.settings['dealrift-price-scope'], 'worldwide')
 }))
 
 test('corrupt library is reported and preserved instead of silently resetting', () => fixture(async (dataDir) => {
@@ -41,6 +42,25 @@ test('corrupt library is reported and preserved instead of silently resetting', 
   await assert.rejects(library.read(), /preserved/)
   await assert.rejects(library.update({ action: 'upsert', game: game() }), /preserved/)
   assert.equal(await readFile(file, 'utf8'), '{broken')
+}))
+
+test('worldwide browsing preserves the base country for targets and ignores cheaper foreign quotes', () => fixture(async (dataDir) => {
+  const requestedCountries: string[] = []
+  const library = createLibraryService({ dataDir, queryRadar: async (params) => {
+    requestedCountries.push(params.country)
+    return radar([
+      deal({ id: 'steam-us', countries: ['US'], priceCountry: 'US', salePrice: { amount: 1, currency: 'USD', usd: 1, formatted: '$1' } }),
+      deal({ id: 'steam-co', countries: ['CO'], priceCountry: 'CO', salePrice: { amount: 5, currency: 'USD', usd: 5, formatted: '$5' } }),
+    ])
+  } })
+  await library.update({ action: 'settings', settings: { 'dealrift-country': 'CO', 'dealrift-price-scope': 'worldwide' } })
+  await library.update({ action: 'upsert', game: game('alpha-deluxe', { targetPrice: { amount: 2, currency: 'USD' } }) })
+  const checked = await library.check()
+  assert.deepEqual(requestedCountries, ['CO'])
+  assert.equal(checked.games[0].snapshot?.priceCountry, 'CO')
+  assert.equal(checked.alerts.length, 0)
+  assert.equal(checked.settings['dealrift-country'], 'CO')
+  assert.equal(checked.settings['dealrift-price-scope'], 'worldwide')
 }))
 
 test('imports deeply reject malicious URLs, nested numbers, oversized lists, and unknown fields', () => fixture(async (dataDir) => {
@@ -66,6 +86,7 @@ test('settings and restored backups reject unsafe language, numeric, enum, and l
   const invalid: Record<string, string>[] = [
     { 'dealrift-language': 'fr' }, { 'dealrift-language': '__proto__' },
     { 'dealrift-country': 'ZZ' }, { 'dealrift-sort-mode': 'broken' },
+    { 'dealrift-price-scope': 'all-invalid' },
     { 'dealrift-page-size': '0' }, { 'dealrift-active-view': 'unknown' },
     { 'dealrift-min-savings': 'NaN' }, { 'dealrift-min-savings': '101' },
     { 'dealrift-min-rating': '-1' }, { 'dealrift-max-price': 'Infinity' },

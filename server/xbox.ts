@@ -13,6 +13,8 @@ export interface XboxOptions {
   minSavings: number
   search?: string
   onlyFree?: boolean
+  productIds?: string[]
+  signal?: AbortSignal
 }
 
 function object(value: unknown): JsonObject {
@@ -42,10 +44,11 @@ function storeLocale(country: string, locale: string) {
   return `${nativeLanguages[country] ?? (locale.toLowerCase().startsWith('es') && country === 'US' ? 'es' : 'en')}-${country.toLowerCase()}`
 }
 
-async function request(url: URL): Promise<string> {
+async function request(url: URL, signal?: AbortSignal): Promise<string> {
+  signal?.throwIfAborted()
   const response = await fetch(url, {
     headers: { Accept: 'application/json,text/html' },
-    signal: AbortSignal.timeout(15_000),
+    signal: AbortSignal.any([AbortSignal.timeout(15_000), ...(signal ? [signal] : [])]),
     // These public Microsoft discovery pages may redirect to their canonical search route.
     redirect: 'follow',
   })
@@ -109,7 +112,7 @@ export function parseXboxProducts(payload: unknown, options: XboxOptions, now = 
     const titleKey = normalizedTitle(title)
     // Some upgrade-only bundles are mislabeled Game by the catalog. Do not offer these as a full game.
     if (/\b(?:upgrade|actualizacion|dlc|season pass|pase de temporada|expansion pass)\b/.test(titleKey)) continue
-    const query = options.search?.trim()
+    const query = options.productIds === undefined ? options.search?.trim() : undefined
     if (query && !/^product:/i.test(query) && (!searchTitle(query) || !searchTitle(query).split(' ').every((word) => searchTitle(title).split(' ').some((titleWord) => titleWord.startsWith(word))))) continue
     const market = object(array(product.MarketProperties).find((item) => strings(object(item).Markets).includes(country)))
     const rating = object(array(market.UsageData).find((item) => object(item).AggregateTimeSpan === 'AllTime'))
@@ -191,14 +194,20 @@ export function parseXboxProducts(payload: unknown, options: XboxOptions, now = 
   return [...deals.values()].slice(0, Math.max(1, Math.min(MAX_PRODUCTS, Math.floor(options.limit))))
 }
 
-export async function fetchXboxDeals(options: XboxOptions): Promise<{ deals: Deal[]; message: string }> {
+export async function fetchXboxDeals(options: XboxOptions): Promise<{ deals: Deal[]; message: string; discoveryLimited: boolean; partial: boolean }> {
   const country = options.country.toUpperCase()
   if (!/^[A-Z]{2}$/.test(country)) throw new Error('Invalid Xbox market')
+  options.signal?.throwIfAborted()
   const locale = storeLocale(country, options.locale)
   const query = options.search?.trim().slice(0, 100)
   let ids: string[]
   let partialDiscovery = false
-  if (query && /^product:/i.test(query)) {
+  if (options.productIds !== undefined) {
+    if (!Array.isArray(options.productIds) || options.productIds.length > MAX_PRODUCTS || options.productIds.some((id) => typeof id !== 'string' || !PRODUCT_ID.test(id.toUpperCase()))) {
+      throw new Error('Invalid Xbox product identifiers; provide at most 60 valid product IDs')
+    }
+    ids = [...new Set(options.productIds.map((id) => id.toUpperCase()))]
+  } else if (query && /^product:/i.test(query)) {
     const productId = query.slice('product:'.length).toUpperCase()
     if (!PRODUCT_ID.test(productId)) throw new Error('Invalid Xbox product identifier')
     ids = [productId]
@@ -209,35 +218,42 @@ export async function fetchXboxDeals(options: XboxOptions): Promise<{ deals: Dea
     const catalogSearch = new URL(`${CATALOG}/productFamilies/games/products`)
     catalogSearch.search = new URLSearchParams({ market: country, languages: options.locale, query, platformDependencyName: 'Windows.Xbox' }).toString()
     const results = await Promise.allSettled([
-      request(catalogSearch).then((body) => {
+      request(catalogSearch, options.signal).then((body) => {
         const payload = object(JSON.parse(body))
         if (!Array.isArray(payload.ProductIds)) throw new Error('Xbox search format changed')
         return strings(payload.ProductIds).map((id) => id.toUpperCase()).filter((id) => PRODUCT_ID.test(id))
       }),
-      request(searchUrl).then(xboxProductIdsFromHtml),
+      request(searchUrl, options.signal).then(xboxProductIdsFromHtml),
     ])
+    options.signal?.throwIfAborted()
     if (results.every((result) => result.status === 'rejected')) throw new Error('Xbox search is temporarily unavailable')
     partialDiscovery = results.some((result) => result.status === 'rejected')
     ids = [...new Set(results.flatMap((result) => result.status === 'fulfilled' ? result.value : []))].slice(0, MAX_PRODUCTS)
     if (!ids.length && results[0].status === 'rejected') throw new Error('Xbox search returned no verifiable catalog response')
   } else {
     const collection = options.onlyFree ? 'top-free' : 'deals'
-    ids = xboxProductIdsFromHtml(await request(new URL(`https://www.microsoft.com/${locale}/store/${collection}/games/xbox`)))
+    ids = xboxProductIdsFromHtml(await request(new URL(`https://www.microsoft.com/${locale}/store/${collection}/games/xbox`), options.signal))
     if (!ids.length) throw new Error('Xbox collection returned no verifiable products')
   }
   const batches: string[][] = []
   for (let index = 0; index < ids.length; index += 20) batches.push(ids.slice(index, index + 20))
-  const products = await Promise.all(batches.map(async (batch) => {
+  const fetchBatch = async (batch: string[]) => {
     const url = new URL(`${CATALOG}/products`)
     url.search = new URLSearchParams({ bigIds: batch.join(','), market: country, languages: options.locale, fieldsTemplate: 'Details' }).toString()
-    const payload = object(JSON.parse(await request(url)))
+    const payload = object(JSON.parse(await request(url, options.signal)))
     if (!Array.isArray(payload.Products)) throw new Error('Xbox product catalog format changed')
     return payload.Products.filter((product) => batch.includes(text(object(product).ProductId).toUpperCase()))
-  }))
+  }
+  const products: unknown[][] = []
+  if (options.productIds !== undefined) {
+    // The worldwide caller already bounds market concurrency; avoid multiplying it by the batch count.
+    for (const batch of batches) products.push(await fetchBatch(batch))
+  } else products.push(...await Promise.all(batches.map(fetchBatch)))
+  options.signal?.throwIfAborted()
   const deals = parseXboxProducts({ Products: products.flat() }, { ...options, country })
   const spanish = options.locale.toLowerCase().startsWith('es')
   const message = spanish
-    ? `${query ? 'Búsqueda oficial' : options.onlyFree ? 'Muestra de juegos gratuitos oficiales' : 'Muestra de ofertas oficiales'}: ${ids.length} productos consultados en Xbox ${country}; ${deals.length} juegos de consola cumplen los filtros. Sin precios de suscripción ni DLC independientes.${partialDiscovery ? ' Una vía de búsqueda no respondió; cobertura parcial.' : ''}`
-    : `${query ? 'Official search' : options.onlyFree ? 'Official free games sample' : 'Official deals sample'}: ${ids.length} products checked in Xbox ${country}; ${deals.length} console games match the filters. Subscription prices and standalone DLC excluded.${partialDiscovery ? ' One search endpoint was unavailable; partial coverage.' : ''}`
-  return { deals, message }
+    ? `${options.productIds !== undefined ? 'Consulta de productos oficiales' : query ? 'Búsqueda oficial' : options.onlyFree ? 'Muestra de juegos gratuitos oficiales' : 'Muestra de ofertas oficiales'}: ${ids.length} productos consultados en Xbox ${country}; ${deals.length} juegos de consola cumplen los filtros. Sin precios de suscripción ni DLC independientes.${partialDiscovery ? ' Una vía de búsqueda no respondió; cobertura parcial.' : ''}`
+    : `${options.productIds !== undefined ? 'Official product lookup' : query ? 'Official search' : options.onlyFree ? 'Official free games sample' : 'Official deals sample'}: ${ids.length} products checked in Xbox ${country}; ${deals.length} console games match the filters. Subscription prices and standalone DLC excluded.${partialDiscovery ? ' One search endpoint was unavailable; partial coverage.' : ''}`
+  return { deals, message, partial: partialDiscovery, discoveryLimited: partialDiscovery || (options.productIds === undefined && !/^product:/i.test(query ?? '')) }
 }

@@ -1,6 +1,7 @@
 import type { GameEcosystem, DealHistoryPoint, RadarResponse, RegionalScan } from '../shared/dealTypes'
 
 export interface RadarParams {
+  priceScope?: 'country' | 'worldwide'
   onlyFree?: boolean
   ecosystem?: GameEcosystem
   country: string
@@ -13,6 +14,7 @@ export interface RadarParams {
 
 export async function fetchRadar(params: RadarParams, signal?: AbortSignal) {
   const query = new URLSearchParams({
+    priceScope: params.priceScope ?? 'country',
     ecosystem: params.ecosystem ?? 'pc',
     onlyFree: String(params.onlyFree ?? false),
     country: params.country,
@@ -29,7 +31,14 @@ export async function fetchRadar(params: RadarParams, signal?: AbortSignal) {
     throw new Error(`Radar API failed: ${response.status}`)
   }
 
-  return (await response.json()) as RadarResponse
+  const result = (await response.json()) as RadarResponse
+  if (!radarMatchesRequest(result, params)) throw new Error('Radar returned data for a different country, platform or price scope. Please retry.')
+  return result
+}
+
+export function radarMatchesRequest(response: RadarResponse, params: RadarParams) {
+  return response.country === params.country && (response.ecosystem ?? 'pc') === (params.ecosystem ?? 'pc') &&
+    (response.priceScope ?? 'country') === (params.priceScope ?? 'country')
 }
 
 export async function fetchRegionalScan(appId: string, title: string, country: string, signal?: AbortSignal) {

@@ -6,7 +6,7 @@ import { safeImportedStoreUrl } from './importSchemas'
 
 const now = '2026-09-20T12:00:00Z'
 const backup: LibraryState = {
-  schemaVersion: 1, revision: 4, settings: { 'dealrift-language': 'es', 'dealrift-country': 'CO' },
+  schemaVersion: 1, revision: 4, settings: { 'dealrift-language': 'es', 'dealrift-country': 'CO', 'dealrift-price-scope': 'worldwide' },
   games: [{ id: 'portal-2', title: 'Portal 2', owned: false, watched: true, priority: 1, notes: 'Jugar con Ana', updatedAt: now, targetPrice: { amount: 5, currency: 'USD' }, snapshot: { id: 'steam-620', title: 'Portal 2', source: 'Steam', sourceKind: 'official', platform: 'Steam', image: '', url: 'https://store.steampowered.com/app/620/', salePrice: { amount: 5, currency: 'USD', usd: 5, formatted: '$5' }, savingsPercent: 50, signalScore: 80, dealScore: 80, detectedAt: now, isFree: false, countries: ['US'], priceCountry: 'US', riskLevel: 'low', confidence: 'live-api', tags: [], notes: [] } }],
   alerts: [{ id: 'a'.repeat(24), gameId: 'portal-2', title: 'Portal 2', message: 'Target reached', price: 5, currency: 'USD', country: 'US', url: 'https://store.steampowered.com/app/620/', createdAt: now, read: false }], lastCheckedAt: now,
 }
@@ -28,6 +28,7 @@ test('rejects malformed inputs, ambiguity, negative target, invalid boolean and 
   assert.throws(() => parseLibraryImport('[{"title":"A","steamAppId":"a"}]', 'a.json'))
   assert.throws(() => parseLibraryImport(' '.repeat(IMPORT_MAX_BYTES + 1), 'a.json'))
   assert.throws(() => parseLibraryImport(JSON.stringify(Array.from({ length: 501 }, (_, index) => ({ title: `Game ${index}` }))), 'a.json'))
+  assert.throws(() => parseLibraryImport(JSON.stringify({ ...backup, settings: { 'dealrift-price-scope': 'any-invalid-value' } }), 'backup.json'))
 })
 test('backup roundtrip preserves watch data, targets, settings, snapshots and historical alerts without claiming live prices', () => {
   const imported = parseLibraryImport(exportLibraryBackup(backup), 'backup.json', now)

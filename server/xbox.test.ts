@@ -238,3 +238,116 @@ test('Xbox searching with free-only retains title search and removes paid games'
   assert.ok(requests.every((url) => !url.pathname.includes('top-free')))
   assert.deepEqual(result.deals.map((deal) => deal.storeProductId), [free.ProductId])
 })
+
+test('Xbox worldwide batches bypass discovery and title matching while verifying each requested market', async (context) => {
+  const ids = ['9PNN223H8MLZ', ...Array.from({ length: 20 }, (_, index) => String(index).padStart(12, '0'))]
+  const requests: URL[] = []
+  let active = 0
+  context.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
+    const url = new URL(String(input))
+    requests.push(url)
+    assert.equal(url.hostname, 'displaycatalog.mp.microsoft.com')
+    assert.equal(url.pathname, '/v7.0/products')
+    const requested = url.searchParams.get('bigIds')!.split(',')
+    assert.ok(requested.length <= 20)
+    assert.equal(++active, 1, 'Internal product batches must be sequential')
+    await Promise.resolve()
+    active -= 1
+    const country = url.searchParams.get('market')!
+    const products = [...requested, '9P8DL6W0JBB8'].map((id) => {
+      const value = product()
+      value.ProductId = id
+      value.LocalizedProperties[0].Markets = [country]
+      value.LocalizedProperties[0].ProductTitle = country === 'CO' ? 'Nombre localizado' : 'Localised title'
+      const availability = value.DisplaySkuAvailabilities[0].Availabilities[0]
+      availability.Markets = [country]
+      availability.Conditions.StartDate = '2020-01-01T00:00:00Z'
+      availability.Conditions.EndDate = '2099-01-01T00:00:00Z'
+      availability.OrderManagementData.Price = country === 'CO'
+        ? { CurrencyCode: 'COP', ListPrice: 80000, MSRP: 200000 }
+        : { CurrencyCode: 'USD', ListPrice: 20, MSRP: 50 }
+      return value
+    })
+    const response = new Response(JSON.stringify({ Products: products }))
+    Object.defineProperty(response, 'url', { value: url.toString() })
+    return response
+  })
+  for (const country of ['CO', 'US']) {
+    const result = await fetchXboxDeals({ ...options, country, search: 'Unrelated title', productIds: [ids[0].toLowerCase(), ...ids] })
+    assert.deepEqual(result.deals.map((deal) => deal.storeProductId), ids)
+    assert.ok(result.deals.every((deal) => deal.priceCountry === country && deal.salePrice.currency === (country === 'CO' ? 'COP' : 'USD')))
+    assert.equal(result.discoveryLimited, false)
+    assert.equal(result.partial, false)
+  }
+  assert.equal(requests.length, 4)
+})
+
+test('Xbox explicit product batches keep savings and free-only filters and reject invalid IDs before requesting', async (context) => {
+  const ids = ['9PNN223H8MLZ', '9P8DL6W0JBB8']
+  const values = ids.map((id, index) => {
+    const value = product()
+    value.ProductId = id
+    value.DisplaySkuAvailabilities[0].Availabilities = [offer(index ? 0 : 10, index ? 0 : 20)]
+    value.DisplaySkuAvailabilities[0].Availabilities[0].Conditions.StartDate = '2020-01-01T00:00:00Z'
+    value.DisplaySkuAvailabilities[0].Availabilities[0].Conditions.EndDate = '2099-01-01T00:00:00Z'
+    return value
+  })
+  const mock = context.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
+    const response = new Response(JSON.stringify({ Products: values }))
+    Object.defineProperty(response, 'url', { value: String(input) })
+    return response
+  })
+  for (const filters of [{ minSavings: 60 }, { onlyFree: true }]) {
+    const result = await fetchXboxDeals({ ...options, ...filters, productIds: ids, search: 'No matching title' })
+    assert.deepEqual(result.deals.map((deal) => deal.storeProductId), [ids[1]])
+  }
+  assert.deepEqual((await fetchXboxDeals({ ...options, productIds: [] })).deals, [])
+  await assert.rejects(fetchXboxDeals({ ...options, productIds: ['../invalid'] }), /Invalid Xbox product identifiers/)
+  await assert.rejects(fetchXboxDeals({ ...options, productIds: Array.from({ length: 61 }, () => ids[0]) }), /at most 60/)
+  assert.equal(mock.mock.callCount(), 2)
+})
+
+test('Xbox forwards cancellation and stops before the next explicit product batch', async (context) => {
+  const controller = new AbortController()
+  const reason = new Error('Worldwide scan cancelled')
+  const mock = context.mock.method(globalThis, 'fetch', async (_input: string | URL | Request, init?: RequestInit) => {
+    const signal = init?.signal
+    assert.ok(signal)
+    return new Promise<Response>((_resolve, reject) => {
+      signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+      controller.abort(reason)
+    })
+  })
+  const productIds = Array.from({ length: 21 }, (_, index) => String(index).padStart(12, '0'))
+  await assert.rejects(fetchXboxDeals({ ...options, productIds, signal: controller.signal }), reason)
+  assert.equal(mock.mock.callCount(), 1)
+  await assert.rejects(fetchXboxDeals({ ...options, productIds, signal: controller.signal }), reason)
+  assert.equal(mock.mock.callCount(), 1)
+})
+
+test('Xbox distinguishes a failed search endpoint from an intentionally bounded catalogue', async (context) => {
+  let discoveryFails = true
+  context.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
+    const url = new URL(String(input))
+    if (url.hostname === 'www.microsoft.com' && discoveryFails) return new Response('Unavailable', { status: 503 })
+    const value = product()
+    value.DisplaySkuAvailabilities[0].Availabilities[0].Conditions.StartDate = '2020-01-01T00:00:00Z'
+    value.DisplaySkuAvailabilities[0].Availabilities[0].Conditions.EndDate = '2099-01-01T00:00:00Z'
+    const body = url.hostname === 'www.microsoft.com' ? `"productId":"${value.ProductId}"`
+      : JSON.stringify(url.pathname.includes('productFamilies') ? { ProductIds: [value.ProductId] } : { Products: [value] })
+    const response = new Response(body)
+    Object.defineProperty(response, 'url', { value: url.toString() })
+    return response
+  })
+  const partial = await fetchXboxDeals({ ...options, search: 'final fantasy' })
+  assert.equal(partial.deals.length, 1)
+  assert.equal(partial.partial, true)
+  assert.equal(partial.discoveryLimited, true)
+  discoveryFails = false
+  const complete = await fetchXboxDeals({ ...options, search: 'final fantasy' })
+  assert.equal(complete.partial, false)
+  assert.equal(complete.discoveryLimited, true)
+  const exact = await fetchXboxDeals({ ...options, search: 'product:9PNN223H8MLZ' })
+  assert.equal(exact.partial, false)
+  assert.equal(exact.discoveryLimited, false)
+})

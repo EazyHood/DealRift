@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { fetchPlayStationDeals, parsePlayStationPrice, parsePlayStationProduct, parsePlayStationResponse, playStationLocale, playStationTitleMatches } from './playstation.js'
+import { enrichPlayStationWinnerRatings, fetchPlayStationDeals, parsePlayStationPrice, parsePlayStationProduct, parsePlayStationResponse, playStationLocale, playStationTitleMatches, supportedPlayStationCountries } from './playstation.js'
 
 function product(overrides: Record<string, unknown> = {}) {
   return {
@@ -193,4 +193,93 @@ test('free-only title search stays a catalogue search and excludes paid and Plus
   assert.equal(searches, 1)
   assert.equal(result.deals.length, 1)
   assert.equal(result.deals[0].isFree, true)
+})
+
+test('worldwide callers can enumerate supported storefronts without changing the internal country map', () => {
+  const countries = supportedPlayStationCountries()
+  assert.ok(countries.includes('CO') && countries.includes('US') && countries.includes('JP'))
+  assert.ok(!countries.includes('PH') && !countries.includes('VN'))
+  assert.ok(countries.every((country) => playStationLocale(country).length > 0))
+  countries.splice(0)
+  assert.ok(supportedPlayStationCountries().includes('CO'))
+})
+
+test('worldwide catalogue scans omit ratings and respect page bounds from one to four', async (t) => {
+  let calls = 0
+  t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
+    const url = new URL(String(input))
+    assert.equal(url.searchParams.get('operationName'), 'categoryGridRetrieve')
+    calls += 1
+    return response(page([product({ id: `UP4497-PPSA03972_00-${String(calls).padStart(16, '0')}` })], { total: 1000, last: false }))
+  })
+  for (const [maxPages, expectedCalls] of [[0, 1], [2, 2], [99, 4]]) {
+    calls = 0
+    const result = await fetchPlayStationDeals({ country: 'CO', locale: 'en-US', limit: 30, minSavings: 0, enrichRatings: false, maxPages })
+    assert.equal(calls, expectedCalls)
+    assert.equal(result.deals.length, expectedCalls)
+    assert.ok(result.deals.every((deal) => deal.storeRatingPercent === undefined))
+    assert.equal(result.discoveryLimited, true)
+    assert.match(result.message, /Ratings omitted/)
+  }
+})
+
+test('exact PlayStation scans still resolve the product name when optional ratings are disabled', async (t) => {
+  const operations: string[] = []
+  const target = product()
+  t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
+    const operation = new URL(String(input)).searchParams.get('operationName')!
+    operations.push(operation)
+    return operation === 'queryRetrieveTelemetryDataPDPProduct'
+      ? response({ data: { productRetrieve: { id: target.id, name: target.name, starRating: { averageRating: 4.8 } } } })
+      : response(page([target], { search: true, total: 100, last: false, next: 'next' }))
+  })
+  const result = await fetchPlayStationDeals({ country: 'CO', locale: 'en-US', limit: 30, minSavings: 0, search: `product:${target.id}`, enrichRatings: false })
+  assert.deepEqual(operations, ['queryRetrieveTelemetryDataPDPProduct', 'getSearchResults'])
+  assert.equal(result.deals[0].storeProductId, target.id)
+  assert.equal(result.deals[0].storeRatingPercent, undefined)
+  assert.equal(result.discoveryLimited, false)
+})
+
+test('PlayStation forwards caller cancellation and never continues to ratings after abort', async (t) => {
+  const controller = new AbortController()
+  const reason = new Error('Worldwide scan cancelled')
+  const mock = t.mock.method(globalThis, 'fetch', async (_input: string | URL | Request, init?: RequestInit) => {
+    const signal = init?.signal
+    assert.ok(signal)
+    return new Promise<Response>((_resolve, reject) => {
+      signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+      controller.abort(reason)
+    })
+  })
+  await assert.rejects(fetchPlayStationDeals({ country: 'CO', locale: 'en-US', limit: 30, minSavings: 0, signal: controller.signal }), reason)
+  assert.equal(mock.mock.callCount(), 1)
+  await assert.rejects(fetchPlayStationDeals({ country: 'CO', locale: 'en-US', limit: 30, minSavings: 0, signal: controller.signal }), reason)
+  assert.equal(mock.mock.callCount(), 1)
+})
+
+test('PlayStation winner ratings share one bounded queue across countries and validate the returned product', async (t) => {
+  const winners = Array.from({ length: 30 }, (_, index) => parsePlayStationProduct(product({ id: `UP4497-PPSA03972_00-${String(index).padStart(16, '0')}` }), index % 2 ? 'ES' : 'CO')!)
+  let active = 0
+  let peakActive = 0
+  let calls = 0
+  t.mock.method(globalThis, 'fetch', async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input))
+    assert.equal(url.searchParams.get('operationName'), 'queryRetrieveTelemetryDataPDPProduct')
+    const { productId } = JSON.parse(url.searchParams.get('variables')!)
+    const index = winners.findIndex((deal) => deal.storeProductId === productId)
+    const headers = init?.headers as Record<string, string>
+    assert.equal(headers['X-PSN-Store-Locale-Override'], index % 2 ? 'es-es' : 'es-co')
+    calls += 1
+    peakActive = Math.max(peakActive, ++active)
+    await Promise.resolve()
+    active -= 1
+    return response({ data: { productRetrieve: { id: index === 0 ? 'different-product' : productId, starRating: { averageRating: 4.5 } } } })
+  })
+  const rated = await enrichPlayStationWinnerRatings(winners)
+  assert.equal(calls, 24)
+  assert.equal(peakActive, 4)
+  assert.equal(rated, 23)
+  assert.equal(winners[0].storeRatingPercent, undefined)
+  assert.ok(winners.slice(1, 24).every((deal) => deal.storeRatingPercent === 90))
+  assert.ok(winners.slice(24).every((deal) => deal.storeRatingPercent === undefined))
 })
