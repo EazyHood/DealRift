@@ -1,5 +1,6 @@
 export type Language = 'es' | 'en'
 export type GameEcosystem = 'pc' | 'playstation' | 'xbox'
+export type PriceScope = 'country' | 'worldwide'
 
 export type SourceKind = 'official' | 'authorized' | 'marketplace' | 'freebie' | 'regional'
 
@@ -187,6 +188,8 @@ export interface DealHistoryPoint {
 
 export interface RadarResponse {
   ecosystem?: GameEcosystem
+  priceScope?: PriceScope
+  worldwide?: WorldwideCoverage
   updatedAt: string
   refreshSeconds: number
   country: string
@@ -197,4 +200,15 @@ export interface RadarResponse {
   marketScouts: MarketScout[]
   metrics: RadarMetrics
   sourceStatus: SourceStatus[]
+}
+
+export interface WorldwideCoverage {
+  requestedCountries: string[]
+  checkedCountries: string[]
+  failedCountries: string[]
+  unsupportedCountries: string[]
+  partial: boolean
+  scope: 'catalog-sample' | 'catalog-search' | 'product-lookup'
+  /** Discovery and edition matching are bounded; this is not the entire world catalogue. */
+  discoveryLimited: boolean
 }

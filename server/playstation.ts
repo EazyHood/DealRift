@@ -33,6 +33,22 @@ const STOREFRONTS: Record<string, { locale: string; currency: string }> = {
 }
 
 type RecordValue = Record<string, unknown>
+export interface PlayStationOptions {
+  country: string
+  locale: string
+  limit: number
+  minSavings: number
+  search?: string
+  onlyFree?: boolean
+  enrichRatings?: boolean
+  maxPages?: number
+  signal?: AbortSignal
+}
+
+export function supportedPlayStationCountries(): string[] {
+  return Object.keys(STOREFRONTS)
+}
+
 function object(value: unknown): RecordValue {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as RecordValue : {}
 }
@@ -135,6 +151,7 @@ export function parsePlayStationResponse(payload: unknown, operation: 'search' |
 }
 
 async function request(operation: keyof typeof OPERATIONS, variables: RecordValue, locale: string, signal: AbortSignal) {
+  signal.throwIfAborted()
   const url = new URL(API)
   url.searchParams.set('operationName', operation)
   url.searchParams.set('variables', JSON.stringify(variables))
@@ -161,15 +178,16 @@ async function request(operation: keyof typeof OPERATIONS, variables: RecordValu
   return json
 }
 
-async function enrichRatings(deals: Deal[], locale: string, signal: AbortSignal) {
-  const candidates = deals.slice(0, 24)
-  const boundedSignal = AbortSignal.any([signal, AbortSignal.timeout(8_000)])
+async function enrichRatings(deals: Deal[], locale: string | undefined, signal?: AbortSignal) {
+  const candidates = deals.filter((deal) => deal.ecosystem === 'playstation' && deal.storeProductId && PRODUCT_ID.test(deal.storeProductId)).slice(0, 24)
+  const boundedSignal = AbortSignal.any([AbortSignal.timeout(8_000), ...(signal ? [signal] : [])])
   let cursor = 0
   await Promise.all(Array.from({ length: Math.min(4, candidates.length) }, async () => {
     while (cursor < candidates.length && !boundedSignal.aborted) {
       const deal = candidates[cursor++]
       try {
-        const payload = await request('queryRetrieveTelemetryDataPDPProduct', { productId: deal.storeProductId }, locale, boundedSignal)
+        const storeLocale = locale ?? playStationLocale(deal.priceCountry ?? '')
+        const payload = await request('queryRetrieveTelemetryDataPDPProduct', { productId: deal.storeProductId }, storeLocale, boundedSignal)
         const product = object(object(object(payload).data).productRetrieve)
         const rating = object(product.starRating).averageRating
         if (product.id === deal.storeProductId && typeof rating === 'number' && rating >= 0 && rating <= 5) {
@@ -181,12 +199,19 @@ async function enrichRatings(deals: Deal[], locale: string, signal: AbortSignal)
   return candidates.filter((deal) => deal.storeRatingPercent !== undefined).length
 }
 
-export async function fetchPlayStationDeals(params: { country: string; locale: string; limit: number; minSavings: number; search?: string; onlyFree?: boolean }): Promise<{ deals: Deal[]; message: string }> {
+/** Enrich only the selected worldwide offers, sharing one 24-product / 8-second budget across countries. */
+export async function enrichPlayStationWinnerRatings(deals: Deal[], signal?: AbortSignal): Promise<number> {
+  return enrichRatings(deals, undefined, signal)
+}
+
+export async function fetchPlayStationDeals(params: PlayStationOptions): Promise<{ deals: Deal[]; message: string; discoveryLimited: boolean }> {
   const country = params.country.toUpperCase()
   const locale = playStationLocale(country)
-  const signal = AbortSignal.timeout(30_000)
+  const signal = AbortSignal.any([AbortSignal.timeout(30_000), ...(params.signal ? [params.signal] : [])])
+  signal.throwIfAborted()
   const limit = Math.min(120, Math.max(1, Math.floor(params.limit) || 40))
   const minSavings = Math.min(100, Math.max(0, params.minSavings || 0))
+  const maxPages = Number.isFinite(params.maxPages) ? Math.min(4, Math.max(1, Math.floor(params.maxPages!))) : 4
   let search = params.search?.trim().slice(0, 200) ?? ''
   let exactId: string | undefined
   let rating: number | undefined
@@ -198,14 +223,14 @@ export async function fetchPlayStationDeals(params: { country: string; locale: s
     if (product.id !== exactId || !string(product.name)) throw new Error('This PlayStation product is not available in the selected storefront.')
     search = string(product.name)
     const stars = object(product.starRating).averageRating
-    if (typeof stars === 'number' && stars >= 0 && stars <= 5) rating = Math.round(stars * 20)
+    if (params.enrichRatings !== false && typeof stars === 'number' && stars >= 0 && stars <= 5) rating = Math.round(stars * 20)
   }
   const deals = new Map<string, Deal>()
   const seenProducts = new Set<string>()
   let total = 0, scanned = 0, next = '', exhausted = false
   const now = new Date().toISOString()
   // Bounded requests keep background monitoring predictable; global search is not limited to the deals collection.
-  for (let page = 0; page < 4; page += 1) {
+  for (let page = 0; page < maxPages; page += 1) {
     const payload = search
       ? await request('getSearchResults', { countryCode: country, languageCode: locale.split('-')[0], searchTerm: search,
         pageSize: 48, pageOffset: page, nextCursor: next }, locale, signal)
@@ -233,10 +258,13 @@ export async function fetchPlayStationDeals(params: { country: string; locale: s
   const coverage = es ? `PlayStation ${country}: ${scope}; ${scanned} de ${total} resultados revisados${exhausted ? '' : ' (consulta limitada)'}.`
     : `PlayStation ${country}: ${scope}; checked ${scanned} of ${total} results${exhausted ? '' : ' (bounded query)'}.`
   const selected = [...deals.values()].slice(0, limit)
-  const rated = exactId ? selected.filter((deal) => deal.storeRatingPercent !== undefined).length : await enrichRatings(selected, locale, signal)
-  const ratingCoverage = es ? `Valoración oficial verificada en ${rated} de ${selected.length} juegos (máximo 24 por consulta).`
-    : `Official ratings verified for ${rated} of ${selected.length} games (up to 24 per query).`
-  return { deals: selected, message: `${coverage} ${ratingCoverage} ${es
+  const rated = params.enrichRatings === false ? 0 : exactId ? selected.filter((deal) => deal.storeRatingPercent !== undefined).length : await enrichRatings(selected, locale, signal)
+  signal.throwIfAborted()
+  const ratingCoverage = params.enrichRatings === false
+    ? es ? 'Valoraciones omitidas en esta consulta.' : 'Ratings omitted for this query.'
+    : es ? `Valoración oficial verificada en ${rated} de ${selected.length} juegos (máximo 24 por consulta).`
+      : `Official ratings verified for ${rated} of ${selected.length} games (up to 24 per query).`
+  return { deals: selected, discoveryLimited: !exhausted && !(exactId && selected.length > 0), message: `${coverage} ${ratingCoverage} ${es
     ? 'Precios públicos sin Plus; se omiten demos, reservas y complementos identificados. Esta fuente no publica la fecha de fin de cada oferta.'
     : 'Public prices without Plus; identified demos, preorders and add-ons are omitted. This source does not publish each offer’s end date.'}` }
 }

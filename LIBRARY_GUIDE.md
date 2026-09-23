@@ -2,6 +2,14 @@
 
 Abre **Mi biblioteca** para guardar juegos, marcar los que posees y asignar prioridad, notas y un precio objetivo. Los favoritos se conservan aunque cambies la búsqueda o cierres la aplicación. Un título sin precio verificado puede guardarse y comprobarse después.
 
+## Encontrar el menor precio entre países
+
+En el selector de país, elige **Cualquier país · menor precio en USD**. Funciona en PC, PlayStation y Xbox: muestra el menor precio encontrado entre los países consultados, con USD como importe principal y el país y precio original debajo. Puedes seguir buscando por título y usar los filtros del radar. Al elegir un país concreto vuelves a la vista local.
+
+La cobertura indica cuántos países respondieron y si faltan resultados. Las consultas de catálogo tienen límites; «menor precio encontrado» no garantiza que se haya consultado todo el mercado. La conversión a USD es aproximada y la tienda determina los requisitos de cuenta y compra de cada región.
+
+Este modo conserva el último país concreto como **país base** para tus alertas y presupuesto. Guardar una oferta extranjera no la convierte en una oferta válida para ese país; **Comprobar favoritos** vuelve a consultar el precio del país base.
+
 ## Avisos de precio
 
 Activa seguimiento en cada juego y configura un objetivo en su moneda o en USD. Sin objetivo, DealRift registra la primera oferta verificada y nuevas bajadas. Con objetivo, registra la primera coincidencia, una bajada adicional o un nuevo cruce por debajo del objetivo. Los juegos poseídos no generan avisos.

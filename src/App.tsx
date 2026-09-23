@@ -54,10 +54,10 @@ import { RadarCanvas } from './components/RadarCanvas'
 import { LibraryPanel } from './components/LibraryPanel'
 import { GameDetail } from './components/GameDetail'
 import { readSetting, usePersonalLibrary } from './lib/personalLibrary'
-import { offerExclusion } from './lib/planner'
+import { nativePriceLabel, radarOfferExclusion, worldwidePriceLabel, worldwideUsd, type PriceScope } from './lib/priceScope'
 import { libraryGameId, type LibraryState, type LibraryAction } from './shared/libraryTypes'
 import { useCopy } from './lib/i18n'
-import { fetchHistory, fetchRadar, fetchRegionalScan, type RadarParams } from './lib/radarApi'
+import { fetchHistory, fetchRadar, fetchRegionalScan, radarMatchesRequest, type RadarParams } from './lib/radarApi'
 import type {
   Deal,
   DealHistoryPoint,
@@ -329,12 +329,14 @@ function useRadarData(params: RadarParams, autoRefresh: boolean) {
   const [tick, setTick] = useState(0)
   const requestKey = JSON.stringify(params)
   const [loadedKey, setLoadedKey] = useState('')
+  const [errorKey, setErrorKey] = useState('')
 
   const refresh = useCallback(() => setTick((value) => value + 1), [])
 
   useEffect(() => {
     const controller = new AbortController()
     setLoading(true)
+    setError(null)
     fetchRadar(params, controller.signal)
       .then((response) => {
         if (controller.signal.aborted) return
@@ -344,6 +346,7 @@ function useRadarData(params: RadarParams, autoRefresh: boolean) {
       })
       .catch((nextError: unknown) => {
         if (!controller.signal.aborted) {
+          setErrorKey(requestKey)
           setError(nextError instanceof Error ? nextError.message : 'Radar failed')
         }
       })
@@ -355,12 +358,13 @@ function useRadarData(params: RadarParams, autoRefresh: boolean) {
   }, [params, tick, requestKey])
 
   useEffect(() => {
-    if (!autoRefresh) return
+    if (!autoRefresh || loading) return
     const interval = window.setInterval(refresh, Math.max(30, data?.refreshSeconds ?? 300) * 1000)
     return () => window.clearInterval(interval)
-  }, [autoRefresh, data?.refreshSeconds, refresh])
+  }, [autoRefresh, loading, data?.refreshSeconds, refresh])
 
-  return { data: loadedKey === requestKey ? data : null, error, loading, refresh }
+  const currentError = errorKey === requestKey ? error : null
+  return { data: loadedKey === requestKey ? data : null, error: currentError, loading: loading || (loadedKey !== requestKey && !currentError), refresh }
 }
 
 function useHistoryData(refreshKey: string | undefined, ecosystem: GameEcosystem, country: string) {
@@ -393,6 +397,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
   const [ecosystem, setEcosystem] = useState<GameEcosystem>(() => readSetting('dealrift-ecosystem', 'pc') as GameEcosystem)
   const [device, setDevice] = useState('all')
   const [country, setCountry] = useState(() => readSetting('dealrift-country', 'US'))
+  const [priceScope, setPriceScope] = useState<PriceScope>(() => readSetting('dealrift-price-scope', 'country') === 'worldwide' ? 'worldwide' : 'country')
   const [query, setQuery] = useState('')
   const [submittedQuery, setSubmittedQuery] = useState('')
   const [minSavings, setMinSavings] = useState(() => Number(readSetting('dealrift-min-savings', '35')))
@@ -407,7 +412,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
   const [maxPrice, setMaxPrice] = useState(() => Number(readSetting('dealrift-max-price', '100')))
   const [minRating, setMinRating] = useState(() => Number(readSetting('dealrift-min-rating', '0')))
   const [onlyFree, setOnlyFree] = useState(() => readSetting('dealrift-only-free', 'false') === 'true')
-  const [onlyRegional, setOnlyRegional] = useState(() => readSetting('dealrift-only-regional', 'false') === 'true')
+  const [onlyRegional, setOnlyRegional] = useState(() => priceScope === 'country' && readSetting('dealrift-only-regional', 'false') === 'true')
   const [onlyWatched, setOnlyWatched] = useState(() => readSetting('dealrift-only-watched', 'false') === 'true')
   const [onlyEndingSoon, setOnlyEndingSoon] = useState(() => ecosystem !== 'playstation' && readSetting('dealrift-only-ending-soon', 'false') === 'true')
   const [onlyDeepDiscount, setOnlyDeepDiscount] = useState(() => readSetting('dealrift-only-deep-discount', 'false') === 'true')
@@ -436,17 +441,18 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
       onlyFree,
       ecosystem,
       country,
+      priceScope,
       locale,
       limit: 120,
       minSavings,
       search: ecosystem === 'pc' && /^(steam|gog|epic|epic games store|humble|humble store|greenmangaming|fanatical|ubisoft|uplay)$/i.test(submittedQuery) ? undefined : submittedQuery || undefined,
       regionSample: ecosystem === 'pc' ? 5 : 0,
     }),
-    [onlyFree, ecosystem, country, locale, minSavings, submittedQuery],
+    [onlyFree, ecosystem, country, priceScope, locale, minSavings, submittedQuery],
   )
 
   const { data: radarData, error, loading, refresh } = useRadarData(params, autoRefresh)
-  const data = radarData?.country === country && (radarData.ecosystem ?? 'pc') === ecosystem ? radarData : null
+  const data = radarData && radarMatchesRequest(radarData, params) ? radarData : null
   const history = useHistoryData(data?.updatedAt, ecosystem, country)
 
   useEffect(() => {
@@ -472,6 +478,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
       'dealrift-language': String(language),
       'dealrift-ecosystem': ecosystem,
       'dealrift-country': String(country),
+      'dealrift-price-scope': priceScope,
       'dealrift-min-savings': String(minSavings),
       'dealrift-alert-savings': String(alertSavings),
       'dealrift-alert-signal': String(alertSignal),
@@ -495,6 +502,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
     alertSignal,
     compactMode,
     country,
+    priceScope,
     ecosystem,
     language,
     maxPrice,
@@ -534,6 +542,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
     const normalizedQuery = submittedQuery.trim().toLowerCase()
     const appIdQuery = /^(?:steam:)?(\d{1,10})$/.exec(normalizedQuery)?.[1]
     const filtered = source.filter((deal) => {
+      if (priceScope === 'worldwide' && worldwideUsd(deal) === undefined) return false
       const searchOk =
         ecosystem !== 'pc' || !normalizedQuery ||
         (Boolean(appIdQuery) && deal.steamAppId === appIdQuery) ||
@@ -562,7 +571,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
     })
 
     return [...filtered].sort((a, b) => {
-      const eligibility = Number(Boolean(offerExclusion(a, country, 'USD', now))) - Number(Boolean(offerExclusion(b, country, 'USD', now)))
+      const eligibility = Number(Boolean(radarOfferExclusion(a, country, priceScope, now))) - Number(Boolean(radarOfferExclusion(b, country, priceScope, now)))
       if (eligibility) return eligibility
       if (sortMode === 'price') return dealUsd(a) - dealUsd(b) || b.savingsPercent - a.savingsPercent || intelligenceScore(b) - intelligenceScore(a)
       if (sortMode === 'savings') return b.savingsPercent - a.savingsPercent || dealUsd(a) - dealUsd(b)
@@ -572,7 +581,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
       if (sortMode === 'signal') return intelligenceScore(b) - intelligenceScore(a) || dealUsd(a) - dealUsd(b)
       return valueScore(b) - valueScore(a) || dealUsd(a) - dealUsd(b)
     })
-  }, [data, country, now, maxPrice, minRating, onlyDeepDiscount, onlyEndingSoon, onlyExceptional, onlyFree, onlyLowRisk, onlyRegional, onlyWatched, selectedStore, showHighRisk, sortMode, sourceFilter, submittedQuery, watchlist, ownedGames, hideOwned, device, ecosystem])
+  }, [data, country, priceScope, now, maxPrice, minRating, onlyDeepDiscount, onlyEndingSoon, onlyExceptional, onlyFree, onlyLowRisk, onlyRegional, onlyWatched, selectedStore, showHighRisk, sortMode, sourceFilter, submittedQuery, watchlist, ownedGames, hideOwned, device, ecosystem])
 
   const storeOptions = useMemo(() => {
     const counts = new Map<string, number>()
@@ -599,7 +608,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
   }, [data])
 
   const dealHighlights = useMemo(() => {
-    const pool = deals.filter((deal) => !offerExclusion(deal, country, 'USD'))
+    const pool = deals.filter((deal) => !radarOfferExclusion(deal, country, priceScope, now))
     const paid = pool.filter((deal) => !deal.isFree && dealUsd(deal) > 0)
     const endingSoon = pool.filter(isEndingSoon).sort((a, b) => endingSoonScore(a) - endingSoonScore(b))[0]
 
@@ -612,7 +621,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
     ].filter((deal): deal is Deal => Boolean(deal))
 
     return candidates.filter((deal, index) => candidates.findIndex((item) => item.id === deal.id) === index).slice(0, 4)
-  }, [deals, country])
+  }, [deals, country, priceScope, now])
 
   const activeFilterLabels = useMemo(
     () =>
@@ -639,12 +648,12 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
   const filteredMetrics = useMemo(
     () => ({
       total: deals.length,
-      free: deals.filter((deal) => deal.isFree && !offerExclusion(deal, country, 'USD')).length,
-      upcoming: deals.filter((deal) => deal.availability === 'upcoming' && !deal.freshness?.stale && deal.priceCountry === country).length,
-      maxSavings: deals.filter((deal) => !offerExclusion(deal, country, 'USD')).reduce((highest, deal) => Math.max(highest, deal.savingsPercent), 0),
-      regions: deals.filter((deal) => Boolean(deal.bestRegion)).length,
+      free: deals.filter((deal) => deal.isFree && !radarOfferExclusion(deal, country, priceScope, now)).length,
+      upcoming: deals.filter((deal) => deal.availability === 'upcoming' && !deal.freshness?.stale && (priceScope === 'worldwide' || deal.priceCountry === country)).length,
+      maxSavings: deals.filter((deal) => !radarOfferExclusion(deal, country, priceScope, now)).reduce((highest, deal) => Math.max(highest, deal.savingsPercent), 0),
+      regions: priceScope === 'worldwide' ? new Set(deals.map((deal) => deal.priceCountry).filter(Boolean)).size : deals.filter((deal) => Boolean(deal.bestRegion)).length,
     }),
-    [deals, country],
+    [deals, country, priceScope, now],
   )
 
   const totalPages = Math.max(1, Math.ceil(deals.length / pageSize))
@@ -657,7 +666,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
 
   useEffect(() => {
     setCurrentPage(1)
-  }, [ecosystem, device, country, maxPrice, minRating, minSavings, onlyDeepDiscount, onlyEndingSoon, onlyExceptional, onlyFree, onlyLowRisk, onlyRegional, onlyWatched, pageSize, selectedStore, showHighRisk, sortMode, sourceFilter, submittedQuery])
+  }, [ecosystem, device, country, priceScope, maxPrice, minRating, minSavings, onlyDeepDiscount, onlyEndingSoon, onlyExceptional, onlyFree, onlyLowRisk, onlyRegional, onlyWatched, pageSize, selectedStore, showHighRisk, sortMode, sourceFilter, submittedQuery])
 
   useEffect(() => {
     setCurrentPage((page) => Math.min(page, totalPages))
@@ -760,6 +769,23 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
     searchInputRef.current?.focus()
   }
 
+  const selectPriceCountry = (value: string) => {
+    if (value === 'WORLDWIDE') {
+      setPriceScope('worldwide')
+      setSortMode('price')
+      setOnlyRegional(false)
+      if (sourceFilter === 'regional') setSourceFilter('all')
+      if (activeView === 'regions') setActiveView('deals')
+    } else {
+      setPriceScope('country')
+      setCountry(value)
+    }
+    setManualScan(null)
+    setSelectedScanId('')
+    setDetailDeal(null)
+    setCurrentPage(1)
+  }
+
   const scanDealRegions = async (deal: Deal) => {
     if (!deal.steamAppId || deal.isFree) return
     setActiveView('regions')
@@ -792,7 +818,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
     setMinSavings(35)
     setSourceFilter('all')
     setSelectedStore('all')
-    setSortMode('value')
+    setSortMode(priceScope === 'worldwide' ? 'price' : 'value')
     setMaxPrice(100)
     setMinRating(0)
     setOnlyFree(false)
@@ -813,14 +839,14 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
     setEcosystem(next); setDevice('all'); setSourceFilter('all'); setSelectedStore('all'); setOnlyRegional(false)
     setManualScan(null); setSelectedScanId(''); setDetailDeal(null); setCurrentPage(1)
     if (next === 'playstation') setOnlyEndingSoon(false)
-    if (sortMode === 'regional') setSortMode('value')
+    if (sortMode === 'regional') setSortMode(priceScope === 'worldwide' ? 'price' : 'value')
     if (activeView === 'regions') setActiveView('deals')
   }
 
   const dataIsStale = Boolean(
     data && now - new Date(data.updatedAt).getTime() > Math.max(60, data.refreshSeconds * 2) * 1000,
   )
-  const sourcesDegraded = Boolean(data?.sourceStatus.some((source) => !source.ok))
+  const sourcesDegraded = Boolean(data?.sourceStatus.some((source) => !source.ok) || data?.worldwide?.partial)
   const connectionTone = !online ? 'offline' : error || dataIsStale || sourcesDegraded ? 'stale' : 'live'
   const connectionLabel = !online ? t('offline') : error || dataIsStale ? t('dataStale') : sourcesDegraded ? t('partialData') : t('online')
 
@@ -857,7 +883,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
               {data ? <small>{formatRelativeTime(data.updatedAt, language, now)}</small> : null}
             </span>
           </div>
-          <button type="button" className="icon-text" onClick={refresh} title={t('refresh')}>
+          <button type="button" className="icon-text" onClick={refresh} title={t('refresh')} disabled={loading}>
             <RefreshCw size={18} className={loading ? 'spin' : ''} />
             <span>{t('refresh')}</span>
           </button>
@@ -880,7 +906,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
           {(['pc', 'playstation', 'xbox'] as const).map((platform) => <button key={platform} type="button" aria-pressed={ecosystem === platform} onClick={() => switchEcosystem(platform)}><Gamepad2 size={17} />{platform === 'pc' ? 'PC' : platform === 'playstation' ? 'PlayStation' : 'Xbox'}</button>)}
         </div>
         {ecosystem !== 'pc' ? <label className="compact-select"><span>{language === 'es' ? 'Consola' : 'Console'}</span><select aria-label={language === 'es' ? 'Filtrar consola' : 'Filter console'} value={device} onChange={(event) => setDevice(event.target.value)}><option value="all">{t('all')}</option>{(ecosystem === 'playstation' ? [['ps5', 'PS5'], ['ps4', 'PS4']] : [['series', 'Xbox Series X|S'], ['xbox one', 'Xbox One']]).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label> : null}
-        <span className="platform-caption">{ecosystem === 'pc' ? (language === 'es' ? 'Tiendas y ofertas para ordenador' : 'PC stores and offers') : (language === 'es' ? 'Tienda oficial · Precios del país seleccionado' : 'Official store · Selected country prices')}</span>
+        <span className="platform-caption">{priceScope === 'worldwide' ? t('worldwideHeading') : ecosystem === 'pc' ? (language === 'es' ? 'Tiendas y ofertas para ordenador' : 'PC stores and offers') : (language === 'es' ? 'Tienda oficial · Precios del país seleccionado' : 'Official store · Selected country prices')}</span>
       </section>
       <section className="control-band">
         <form className="search-box" onSubmit={submitSearch}>
@@ -903,10 +929,11 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
           <button type="submit">{t('scan')}</button>
         </form>
 
-        <label className="field">
+        <label className="field country-scope-field">
           <Globe2 size={16} />
-          <span>{t('country')}</span>
-          <select value={country} onChange={(event) => setCountry(event.target.value)}>
+          <span>{t('priceScope')}</span>
+          <select aria-label={t('priceScope')} value={priceScope === 'worldwide' ? 'WORLDWIDE' : country} onChange={(event) => selectPriceCountry(event.target.value)} aria-describedby={priceScope === 'worldwide' ? 'worldwide-scope-note' : undefined}>
+            <option value="WORLDWIDE">{t('worldwideOption')}</option>
             {countries.map((item) => (
               <option key={item.code} value={item.code}>
                 {item.code} - {item[language]}
@@ -922,7 +949,13 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
         </label>
       </section>
 
-      {ecosystem !== 'pc' ? <p className="console-coverage-note">{language === 'es' ? 'Catálogo y búsquedas con un número limitado de resultados. Las valoraciones solo se filtran cuando la tienda las publica; no incluyen beneficios de PS Plus o Game Pass. El comparador entre países está disponible para Steam.' : 'Catalog and searches return a limited set of results. Rating filters use published store ratings only; PS Plus or Game Pass benefits are excluded. Cross-country comparison is available for Steam.'} {ecosystem === 'playstation' ? (language === 'es' ? 'PlayStation no publica fechas de finalización en esta fuente.' : 'PlayStation does not publish end dates in this source.') : ''}</p> : null}
+      {priceScope === 'worldwide' ? <section className={`worldwide-summary ${data?.worldwide?.partial ? 'is-partial' : ''}`} aria-label={t('worldwideHeading')}>
+        <div className="worldwide-summary-heading"><strong><Globe2 size={17} />{t('worldwideHeading')}</strong><span role="status" aria-live="polite">{loading ? <><RefreshCw size={15} className="spin" />{t('worldwideLoading')}</> : data?.worldwide ? <>{data.worldwide.checkedCountries.length}/{data.worldwide.requestedCountries.length} {t('worldwideCoverage')}{data.worldwide.partial ? ` · ${t('worldwidePartial')}` : ''}</> : t('worldwideNoCoverage')}</span></div>
+        <p id="worldwide-scope-note">{t('worldwideScopeNote')} {t('worldwideAccountNote')}</p>
+        <small>{t('worldwideBaseNote')}: <strong>{country}</strong>.</small>
+        {data?.worldwide && !loading ? <details><summary>{language === 'es' ? 'Ver cobertura por país' : 'View country coverage'}</summary><p>{language === 'es' ? 'Comprobados' : 'Checked'}: {data.worldwide.checkedCountries.join(', ') || '—'}</p>{data.worldwide.failedCountries.length ? <p>{language === 'es' ? 'No se pudieron comprobar' : 'Could not check'}: {data.worldwide.failedCountries.join(', ')}</p> : null}{data.worldwide.unsupportedCountries?.length ? <p>{language === 'es' ? 'Sin cobertura en esta tienda' : 'Not supported by this store'}: {data.worldwide.unsupportedCountries.join(', ')}</p> : null}</details> : null}
+      </section> : null}
+      {ecosystem !== 'pc' ? <p className="console-coverage-note">{language === 'es' ? 'Catálogo y búsquedas con un número limitado de resultados. Las valoraciones solo se filtran cuando la tienda las publica; no incluyen beneficios de PS Plus o Game Pass.' : 'Catalog and searches return a limited set of results. Rating filters use published store ratings only; PS Plus or Game Pass benefits are excluded.'} {ecosystem === 'playstation' ? (language === 'es' ? 'PlayStation no publica fechas de finalización en esta fuente.' : 'PlayStation does not publish end dates in this source.') : ''}</p> : null}
       <section className="metric-grid">
         <Metric icon={<Gamepad2 size={22} />} label={t('totalDeals')} value={String(filteredMetrics.total)} />
         <Metric icon={<Gift size={22} />} label={t('freeGames')} value={String(filteredMetrics.free)} tone="green" />
@@ -932,7 +965,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
       </section>
 
       <nav className="view-tabs" aria-label={t('sections')}>
-        {dashboardTabs.filter((view) => ecosystem === 'pc' || view.id !== 'regions').map((view) => (
+          {dashboardTabs.filter((view) => (ecosystem === 'pc' && priceScope === 'country') || view.id !== 'regions').map((view) => (
           <button
             key={view.id}
             type="button"
@@ -967,7 +1000,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
           <div className="deal-toolbar">
             <section className="filter-strip">
               {showAdvancedFilters ? <div className="segmented" aria-label={t('source')}>
-                {sourceFilters.filter((filter) => ecosystem === 'pc' || ['all', 'official'].includes(filter)).map((filter) => (
+                {sourceFilters.filter((filter) => (ecosystem === 'pc' || ['all', 'official'].includes(filter)) && (priceScope === 'country' || filter !== 'regional')).map((filter) => (
                   <button
                     key={filter}
                     type="button"
@@ -996,7 +1029,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
                 <label className="compact-select">
                   <BarChart3 size={16} />
                   <select value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)}>
-                    {sortModes.filter((mode) => ecosystem === 'pc' || mode !== 'regional').map((mode) => (
+                    {sortModes.filter((mode) => (ecosystem === 'pc' && priceScope === 'country') || mode !== 'regional').map((mode) => (
                       <option key={mode} value={mode}>
                         {t('sort')}: {t(mode)}
                       </option>
@@ -1068,7 +1101,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
               </div>
             </section>
 
-            {showAdvancedFilters && dealHighlights.length ? <DealHighlights deals={dealHighlights} t={t} /> : null}
+            {showAdvancedFilters && dealHighlights.length ? <DealHighlights deals={dealHighlights} priceScope={priceScope} t={t} /> : null}
 
             {showAdvancedFilters ? (
               <section className="advanced-filters">
@@ -1087,7 +1120,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
                   <span>{t('onlyFree')}</span>
                 </label>
 
-                {ecosystem === 'pc' ? <label className={`quick-toggle ${onlyRegional ? 'active' : ''}`}>
+                {ecosystem === 'pc' && priceScope === 'country' ? <label className={`quick-toggle ${onlyRegional ? 'active' : ''}`}>
                   <input type="checkbox" checked={onlyRegional} onChange={(event) => setOnlyRegional(event.target.checked)} />
                   <span>{t('onlyRegional')}</span>
                 </label> : null}
@@ -1126,7 +1159,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
           </div>
 
           <div className="deal-column">
-            <SectionTitle icon={<Zap size={19} />} label={t('dealFeed')} meta={data ? `${t('updated')} ${formatTime(data.updatedAt)}` : t('loading')} />
+            <SectionTitle icon={<Zap size={19} />} label={priceScope === 'worldwide' ? t('worldwideHeading') : t('dealFeed')} meta={data ? `${t('updated')} ${formatTime(data.updatedAt)}` : priceScope === 'worldwide' ? t('scanningRegions') : t('loading')} />
             <div className="deal-list">
               {loading && !data ? (
                 Array.from({ length: 4 }, (_, index) => <DealSkeleton key={`skeleton-${index}`} />)
@@ -1143,6 +1176,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
                     onToggleWatch={toggleWatch}
                     onOpenDetail={setDetailDeal}
                     country={country}
+                    priceScope={priceScope}
                     t={t}
                   />
                 ))
@@ -1264,7 +1298,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
           </section>
 
           <section className="tool-panel">
-            <SectionTitle icon={<Clock3 size={18} />} label={t('timeline')} meta={`${history.length} ${t('history')}`} />
+            <SectionTitle icon={<Clock3 size={18} />} label={t('timeline')} meta={`${history.length} ${t('history')} · ${country}`} />
             <div className="chart-shell analytics-chart">
               <ResponsiveContainer width="100%" height={250}>
                 <LineChart data={historyChart} margin={{ top: 8, right: 12, bottom: 0, left: -20 }}>
@@ -1315,7 +1349,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
           </section>
         </section>
       ) : null}
-      {detailDeal ? <GameDetail deal={detailDeal} offers={data?.deals ?? []} language={language} country={country}
+      {detailDeal ? <GameDetail deal={detailDeal} offers={data?.deals ?? []} language={language} country={country} priceScope={priceScope}
         onClose={() => setDetailDeal(null)} onWatch={toggleWatch} watched={watchlist.some((game) => libraryMatchesDeal(game, detailDeal))} /> : null}
     </main>
     </>
@@ -1331,17 +1365,18 @@ interface MetricProps {
 
 interface DealHighlightsProps {
   deals: Deal[]
+  priceScope: PriceScope
   t: ReturnType<typeof useCopy>
 }
 
-function DealHighlights({ deals, t }: DealHighlightsProps) {
+function DealHighlights({ deals, priceScope, t }: DealHighlightsProps) {
   return (
     <div className="deal-highlights">
       {deals.map((deal) => (
         <a key={`highlight-${deal.id}`} href={deal.url} target="_blank" rel="noreferrer">
           <span>{deal.intelligence?.verdict === 'exceptional' ? t('verdictExceptional') : deal.isFree ? t('freebies') : deal.savingsPercent >= 90 ? t('maxSavings') : isEndingSoon(deal) ? t('endingSoon') : t('price')}</span>
           <strong>{deal.title}</strong>
-          <small>{deal.source} - {deal.isFree ? t('freePrice') : deal.salePrice.formatted}</small>
+          <small>{deal.source} - {priceScope === 'worldwide' ? `${worldwidePriceLabel(deal)} · ${deal.priceCountry}` : deal.isFree ? t('freePrice') : deal.salePrice.formatted}</small>
         </a>
       ))}
     </div>
@@ -1469,6 +1504,7 @@ function IntelligencePanel({ deal, alternatives, t }: IntelligencePanelProps) {
 
 interface DealRowProps {
   country: string
+  priceScope: PriceScope
   deal: Deal
   index: number
   isWatched: boolean
@@ -1480,7 +1516,7 @@ interface DealRowProps {
   t: ReturnType<typeof useCopy>
 }
 
-function DealRow({ deal, country, index, isWatched, isScanning, alternatives, onRegionScan, onToggleWatch, onOpenDetail, t }: DealRowProps) {
+function DealRow({ deal, country, priceScope, index, isWatched, isScanning, alternatives, onRegionScan, onToggleWatch, onOpenDetail, t }: DealRowProps) {
   const [expanded, setExpanded] = useState(false)
   const [copied, setCopied] = useState(false)
   const hasRegion = !deal.isFree && Boolean(deal.bestRegion && deal.bestRegion.usd < dealUsd(deal) * 0.98)
@@ -1488,8 +1524,8 @@ function DealRow({ deal, country, index, isWatched, isScanning, alternatives, on
   const nextDate = upcoming ? deal.startsAt : deal.expiresAt
   const timeLeft = formatTimeLeft(nextDate)
   const normalizedUsd = deal.salePrice.usd
-  const showUsd = !deal.isFree && deal.salePrice.currency !== 'USD' && typeof normalizedUsd === 'number'
-  const priceNow = upcoming ? t('upcomingFree') : deal.isFree ? t('freePrice') : deal.salePrice.formatted
+  const showUsd = priceScope === 'country' && !deal.isFree && deal.salePrice.currency !== 'USD' && typeof normalizedUsd === 'number'
+  const priceNow = upcoming ? t('upcomingFree') : priceScope === 'worldwide' ? worldwidePriceLabel(deal) : deal.isFree ? t('freePrice') : deal.salePrice.formatted
   const directLink = !deal.tags.includes('store-search-link') && deal.confidence !== 'search-link'
 
   const copyLink = async () => {
@@ -1528,8 +1564,8 @@ function DealRow({ deal, country, index, isWatched, isScanning, alternatives, on
         <div className="deal-meta">
           <span className="price-now">{priceNow}</span>
           {deal.freshness?.stale || deal.confidence === 'fallback' ? <span className="data-label">{t('cachedPrice')}</span> : null}
-          {deal.priceCountry && deal.priceCountry !== country ? <span className="data-label">{t('foreignPrice')}: {deal.priceCountry}</span> : null}
-          {deal.normalPrice && !deal.isFree ? <span className="price-before">{deal.normalPrice.formatted}</span> : null}
+          {priceScope === 'worldwide' ? <span className="worldwide-native-price">{nativePriceLabel(deal)} · {t('worldwideQuoteCountry')} <strong>{deal.priceCountry}</strong></span> : deal.priceCountry && deal.priceCountry !== country ? <span className="data-label">{t('foreignPrice')}: {deal.priceCountry}</span> : null}
+          {deal.normalPrice && !deal.isFree && priceScope === 'country' ? <span className="price-before">{deal.normalPrice.formatted}</span> : null}
           <span className="save-pill">{formatPercent(deal.savingsPercent)}</span>
           {deal.isFree ? <span className="free-pill">{deal.startsAt && new Date(deal.startsAt) > new Date() ? t('upcoming') : t('claimNow')}</span> : null}
           {deal.savingsPercent >= 80 && !deal.isFree ? <span className="hot-pill">{t('deepDiscount')}</span> : null}
@@ -1540,7 +1576,7 @@ function DealRow({ deal, country, index, isWatched, isScanning, alternatives, on
           {deal.steamRatingPercent ? <span>{deal.steamRatingPercent}% Steam</span> : null}
         </div>
 
-        {hasRegion ? (
+        {hasRegion && priceScope === 'country' ? (
           <div className="region-callout">
             <MapPin size={15} />
             <strong>{t('bestRegion')}: {deal.bestRegion?.countryName}</strong>
@@ -1577,7 +1613,7 @@ function DealRow({ deal, country, index, isWatched, isScanning, alternatives, on
           <ExternalLink size={17} />
           <span>{t('openDeal')}</span>
         </a>
-        {deal.steamAppId && !deal.isFree ? (
+        {deal.steamAppId && !deal.isFree && priceScope === 'country' ? (
           <button type="button" className="ghost-link" onClick={() => onRegionScan(deal)} disabled={isScanning}>
             <Globe2 size={16} className={isScanning ? 'spin' : ''} />
             <span>{isScanning ? t('scanningRegions') : t('regional')}</span>

@@ -68,6 +68,7 @@ const numericSetting = (minimum: number, maximum: number) => z.string()
   .refine((value) => Number.isFinite(Number(value)) && Number(value) >= minimum && Number(value) <= maximum)
 const settingValidators: Record<string, z.ZodType<string>> = {
   'dealrift-ecosystem': z.enum(['pc', 'playstation', 'xbox']),
+  'dealrift-price-scope': z.enum(['country', 'worldwide']),
   'dealrift-language': z.enum(['es', 'en']),
   'dealrift-country': z.enum(['US', 'CO', 'IN', 'TR', 'AR', 'BR', 'MX', 'CL', 'PE', 'ID', 'MY', 'PH', 'TH', 'VN', 'ZA', 'PL', 'CN', 'JP', 'KR', 'GB', 'DE', 'ES', 'CA', 'AU']),
   'dealrift-sort-mode': z.enum(['value', 'price', 'savings', 'regional', 'rating', 'ending', 'signal']),

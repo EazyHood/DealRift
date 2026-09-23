@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import type { AddressInfo } from 'node:net'
 import path from 'node:path'
 import compression from 'compression'
@@ -17,8 +18,9 @@ import {
 } from './intelligence.js'
 import { writeJsonAtomic } from './persistence.js'
 import { registerLibraryRoutes } from './library.js'
-import { fetchPlayStationDeals } from './playstation.js'
+import { enrichPlayStationWinnerRatings, fetchPlayStationDeals, supportedPlayStationCountries } from './playstation.js'
 import { fetchXboxDeals } from './xbox.js'
+import { scanWorldwide, verifiedWorldwideOffer, WORLDWIDE_COUNTRIES, type CountryOffers } from './worldwide.js'
 import { gameIdentity } from '../src/shared/gameIdentity.js'
 import { isAllowedCorsOrigin, SECURITY_HEADERS } from './security.js'
 import { cheapSharkDealUrl, trustedStoreUrl } from './storeLinks.js'
@@ -26,6 +28,7 @@ import type { GameHistoryResponse } from '../src/shared/libraryTypes.js'
 import type {
   Deal,
   GameEcosystem,
+  PriceScope,
   DealHistoryPoint,
   MarketScout,
   RadarMetrics,
@@ -38,9 +41,9 @@ import type {
 } from '../src/shared/dealTypes.js'
 
 const PORT = Number(process.env.PORT ?? 5174)
-const USER_AGENT = process.env.RADAR_USER_AGENT ?? 'DealRift/1.3 (https://github.com/EazyHood/DealRift)'
+const USER_AGENT = process.env.RADAR_USER_AGENT ?? 'DealRift/1.4 (https://github.com/EazyHood/DealRift)'
 const REFRESH_SECONDS = 300
-const APP_VERSION = process.env.DEALRIFT_VERSION ?? '1.3.0-beta.1'
+const APP_VERSION = process.env.DEALRIFT_VERSION ?? '1.4.0-beta.1'
 const dataDir = process.env.DEALRIFT_DATA_DIR ? path.resolve(process.env.DEALRIFT_DATA_DIR) : path.join(process.cwd(), 'data')
 const historyFile = path.join(dataDir, 'deal-history.json')
 const priceHistoryFile = path.join(dataDir, 'deal-price-history.json')
@@ -52,6 +55,7 @@ const cache = new Map<string, CacheEntry<unknown>>()
 let priceHistoryWriteQueue = Promise.resolve()
 let historyWriteQueue = Promise.resolve()
 const cacheLoads = new Map<string, Promise<Cached<unknown>>>()
+const requestContext = new AsyncLocalStorage<AbortSignal>()
 
 const cheapSharkBase = 'https://www.cheapshark.com/api/1.0'
 const epicBase = 'https://store-site-backend-static.ak.epicgames.com/freeGamesPromotions'
@@ -175,6 +179,7 @@ const marketplaceTemplates = [
 
 const querySchema = z.object({
   ecosystem: z.enum(['pc', 'playstation', 'xbox']).default('pc'),
+  priceScope: z.enum(['country', 'worldwide']).default('country'),
   onlyFree: z.preprocess((value) => value === 'true' ? true : value === 'false' ? false : value, z.boolean().default(false)),
   country: z.string().regex(/^[a-zA-Z]{2}$/).default('US').transform((value) => value.toUpperCase()),
   locale: z.string().min(2).max(35).regex(/^[a-zA-Z0-9-]+$/).default('en-US'),
@@ -273,7 +278,7 @@ async function fetchJson<T>(url: string, timeoutMs = 12000): Promise<T> {
 
     try {
       const response = await fetch(url, {
-        signal: controller.signal,
+        signal: requestContext.getStore() ? AbortSignal.any([controller.signal, requestContext.getStore()!]) : controller.signal,
         headers: {
           Accept: 'application/json',
           'User-Agent': USER_AGENT,
@@ -287,6 +292,7 @@ async function fetchJson<T>(url: string, timeoutMs = 12000): Promise<T> {
       return (await response.json()) as T
     } catch (error) {
       lastError = error
+      if (requestContext.getStore()?.aborted) throw error
       if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 350))
     } finally {
       clearTimeout(timeout)
@@ -695,6 +701,7 @@ function mapGogDeals(response: GogCatalogResponse, country: string, locale: stri
 
       return {
         id: `gog-${country}-${product.id}`,
+        storeProductId: product.id,
         title: product.title,
         source: 'GOG',
         sourceKind: 'official',
@@ -797,8 +804,8 @@ async function getSteamSpecials(country: string, locale: string, limit: number, 
   })
 }
 
-async function getGogDeals(country: string, locale: string, limit: number, minSavings: number, search?: string) {
-  const cacheKey = `gog-catalog:${country}:${locale}:${limit}:${minSavings}:${search ?? ''}`
+async function getGogDeals(country: string, locale: string, limit: number, minSavings: number, search?: string, includeFullPrice = false) {
+  const cacheKey = `gog-catalog:${country}:${locale}:${limit}:${minSavings}:${search ?? ''}:${includeFullPrice}`
   return withCache(cacheKey, REFRESH_SECONDS * 1000, async () => {
     const currency = gogCurrency(country)
     const params = new URLSearchParams({
@@ -809,6 +816,7 @@ async function getGogDeals(country: string, locale: string, limit: number, minSa
       locale: gogLocale(locale),
       currencyCode: currency,
     })
+    if (includeFullPrice && search) params.delete('discounted')
     if (search) params.set('query', `like:${search}`)
     const [rates, response] = await Promise.all([
       getExchangeRates(),
@@ -822,14 +830,14 @@ async function getGogDeals(country: string, locale: string, limit: number, minSa
   })
 }
 
-async function getSteamSearchDetails(country: string, locale: string, search: string, discovered: Deal[]) {
+async function getSteamSearchDetails(country: string, locale: string, search: string, discovered: Array<Pick<Deal, 'steamAppId'>>, concurrency = 8) {
   const explicitId = search.match(/^(?:steam:)?(\d{1,10})$/i)?.[1]
   const appIds = [...new Set(explicitId ? [explicitId] : discovered.map((deal) => deal.steamAppId).filter((id): id is string => Boolean(id && /^\d{1,10}$/.test(id))))].slice(0, 8)
   return withCache(`steam-lookup:${country}:${locale}:${search}:${appIds.join(',')}`, REFRESH_SECONDS * 1000, async () => {
     if (appIds.length === 0) return [] as Deal[]
     const rates = await getExchangeRates()
     if (rates.stale) throw new Error(`Exchange rates unavailable: ${rates.error}`)
-    const rows = await Promise.all(appIds.map(async (appId) => {
+    const lookup = async (appId: string) => {
       const params = new URLSearchParams({ appids: appId, cc: country.toLowerCase(), l: steamLanguage(locale), filters: 'basic,price_overview,platforms' })
       const response = await fetchJson<Record<string, SteamAppDetails>>(`https://store.steampowered.com/api/appdetails?${params}`)
       const item = response[appId]
@@ -845,6 +853,14 @@ async function getSteamSearchDetails(country: string, locale: string, search: st
         ...deal, tags: deal.tags.filter((tag) => tag !== 'steam-specials').concat('steam-product-lookup'),
         notes: [`Steam product price checked for app ${appId} in ${country}. Search discovery is limited to IDs supplied by CheapShark or an explicit Steam app ID.`],
       }))
+    }
+    const rows: Deal[][] = Array.from({ length: appIds.length }, () => [])
+    let cursor = 0
+    await Promise.all(Array.from({ length: Math.min(concurrency, appIds.length) }, async () => {
+      while (cursor < appIds.length) {
+        const index = cursor++
+        rows[index] = await lookup(appIds[index])
+      }
     }))
     return rows.flat()
   })
@@ -1042,8 +1058,8 @@ function buildMarketScouts(deals: Deal[], search?: string): MarketScout[] {
   )
 }
 
-function metricsFor(deals: Deal[], regionalScans: RegionalScan[], country: string): RadarMetrics {
-  deals = deals.filter((deal) => isCurrentVerifiedDeal(deal, country))
+function metricsFor(deals: Deal[], regionalScans: RegionalScan[], country: string, priceScope: PriceScope = 'country'): RadarMetrics {
+  deals = deals.filter((deal) => isCurrentVerifiedDeal(deal, priceScope === 'worldwide' ? deal.priceCountry ?? country : country))
   const savings = deals.map((deal) => deal.savingsPercent).filter(Number.isFinite)
   const bestCountries = regionalScans
     .map((scan) => scan.best)
@@ -1215,7 +1231,7 @@ async function loadConsoleRadar(params: LoadRadarParams & { ecosystem: 'playstat
   }
   deals.sort((a, b) => (b.intelligence?.score ?? b.signalScore) - (a.intelligence?.score ?? a.signalScore))
   const response: RadarResponse = {
-    ecosystem, country, locale, updatedAt: nowIso(), refreshSeconds: REFRESH_SECONDS,
+    ecosystem, priceScope: 'country', country, locale, updatedAt: nowIso(), refreshSeconds: REFRESH_SECONDS,
     deals: deals.slice(0, limit), stores: [{ id: ecosystem, name, isActive: true, kind: 'official' }],
     regionalScans: [], marketScouts: [], metrics: metricsFor(deals.slice(0, limit), [], country), sourceStatus,
   }
@@ -1227,7 +1243,172 @@ async function loadConsoleRadar(params: LoadRadarParams & { ecosystem: 'playstat
   return response
 }
 
+async function worldwideConsoleCountry(params: LoadRadarParams & { ecosystem: 'playstation' | 'xbox' }, signal: AbortSignal, productIds?: string[]): Promise<CountryOffers> {
+  const { country, locale, ecosystem, search, onlyFree } = params
+  const name = ecosystem === 'playstation' ? 'PlayStation Store' : 'Xbox'
+  const cached = await withCache(`world-console:${ecosystem}:${country}:${locale}:${Boolean(onlyFree)}:${search ?? ''}:${productIds?.join(',') ?? ''}`, REFRESH_SECONDS * 1000, async () => {
+    const result = ecosystem === 'playstation'
+      ? await fetchPlayStationDeals({ ...params, minSavings: 0, enrichRatings: false, maxPages: search ? 2 : 1, signal })
+      : await fetchXboxDeals({ ...params, minSavings: 0, productIds, signal })
+    let fxError: string | undefined
+    const rates = result.deals.some((deal) => deal.salePrice.currency !== 'USD') ? await getExchangeRates().catch((error: unknown) => {
+      fxError = error instanceof Error ? error.message : 'Exchange rates unavailable.'
+      return undefined
+    }) : undefined
+    if (rates?.stale) fxError = rates.error ?? 'Exchange rates are stale.'
+    const deals: Deal[] = []
+    for (const deal of result.deals) {
+      try {
+        if (deal.salePrice.currency !== 'USD' && (fxError || !rates)) throw new Error(fxError ?? 'Exchange rates unavailable.')
+        deals.push({ ...deal,
+          salePrice: { ...deal.salePrice, usd: roundMoney(toUsd(deal.salePrice.amount, deal.salePrice.currency, rates?.value ?? {})) },
+          normalPrice: deal.normalPrice ? { ...deal.normalPrice, usd: roundMoney(toUsd(deal.normalPrice.amount, deal.normalPrice.currency, rates?.value ?? {})) } : undefined,
+        })
+      } catch (error) { fxError = error instanceof Error ? error.message : 'A price has no reliable USD conversion.' }
+    }
+    return { deals, message: result.message, fxError, partial: 'partial' in result ? Boolean(result.partial) : false }
+  })
+  const sourceStatus = [sourceResultStatus(name, { status: 'fulfilled', value: cached }, cached.value.message, search || productIds ? 'catalog-search' : 'catalog-sample')]
+  if (cached.value.partial) sourceStatus.push(status('Catalogue discovery', false, 'One provider search route failed; the surviving route does not provide complete discovery coverage.'))
+  if (cached.value.fxError) sourceStatus.push(status('USD conversion', false, `${cached.value.fxError} Unconvertible prices were excluded.`))
+  return { deals: cachedDeals({ status: 'fulfilled', value: { ...cached, value: cached.value.deals } }, country), sourceStatus,
+    recheckedProducts: productIds && !cached.stale ? productIds.map((storeProductId) => ({ source: name, storeProductId })) : undefined,
+    stores: [{ id: ecosystem, name, isActive: !cached.stale, kind: 'official' }] }
+}
+
+/** Steam supports price_overview for multiple app IDs in one public request. */
+async function worldwideSteamPrices(country: string, locale: string, discovered: Deal[]): Promise<CountryOffers> {
+  const candidates = new Map<string, Deal>()
+  for (const deal of discovered) {
+    if (deal.source === 'Steam' && deal.steamAppId && !deal.tags.includes('provider-redirect')) candidates.set(deal.steamAppId, deal)
+    if (candidates.size >= 40) break
+  }
+  const appIds = [...candidates.keys()].sort()
+  if (!appIds.length) return { deals: [], sourceStatus: [status('Steam exact product prices', true, 'No official Steam IDs were discovered for exact regional verification.')] }
+  const cached = await withCache(`world-steam-exact:${country}:${locale}:${appIds.join(',')}`, REFRESH_SECONDS * 1000, async () => {
+    const rates = await getExchangeRates()
+    if (rates.stale) throw new Error(`Exchange rates unavailable: ${rates.error}`)
+    const query = new URLSearchParams({ appids: appIds.join(','), cc: country.toLowerCase(), filters: 'price_overview' })
+    const response = await fetchJson<Record<string, SteamAppDetails>>(`https://store.steampowered.com/api/appdetails?${query}`)
+    if (!appIds.some((id) => Object.hasOwn(response, id))) throw new Error('Steam returned no verifiable response for the requested product IDs.')
+    const deals: Deal[] = []
+    for (const appId of appIds) {
+      const product = response[appId]
+      const price = product?.data?.price_overview
+      if (!product?.success || !price || !Number.isFinite(price.final) || price.final < 0 || !Number.isFinite(price.initial)) continue
+      const seed = candidates.get(appId)!
+      const amount = price.final / 100
+      const initial = price.initial / 100
+      deals.push({ ...seed,
+        id: `steam-special-${country}-${appId}`, url: `https://store.steampowered.com/app/${appId}/?cc=${country.toLowerCase()}`,
+        salePrice: { amount, currency: price.currency, formatted: formatMoney(amount, price.currency, locale), usd: roundMoney(toUsd(amount, price.currency, rates.value)) },
+        normalPrice: initial > amount ? { amount: initial, currency: price.currency, formatted: formatMoney(initial, price.currency, locale), usd: roundMoney(toUsd(initial, price.currency, rates.value)) } : undefined,
+        savingsPercent: price.discount_percent, isFree: amount === 0, countries: [country], priceCountry: country,
+        detectedAt: nowIso(), expiresAt: undefined, startsAt: undefined, bestRegion: undefined, intelligence: undefined,
+        availability: 'active', confidence: 'live-api', freshness: undefined,
+        tags: ['official', 'steam-product-lookup'], notes: [`Exact Steam app ${appId} price checked in ${country}, including full-price listings. Edition identity comes from the official Steam product discovery.`],
+      })
+    }
+    return { deals, recheckedProducts: appIds.filter((id) => Object.hasOwn(response, id)).map((steamAppId) => ({ source: 'Steam', steamAppId })) }
+  })
+  return { deals: cachedDeals({ status: 'fulfilled', value: { ...cached, value: cached.value.deals } }, country),
+    recheckedProducts: cached.stale ? undefined : cached.value.recheckedProducts,
+    sourceStatus: [sourceResultStatus('Steam exact product prices', { status: 'fulfilled', value: cached }, `${cached.value.deals.length} of ${appIds.length} exact Steam product IDs priced, including listings outside featured discounts.`)] }
+}
+
+async function loadWorldwideRadar(params: LoadRadarParams & { ecosystem: GameEcosystem }): Promise<RadarResponse> {
+  const { ecosystem, country, locale, limit, minSavings, search, onlyFree } = params
+  // Base country and regional scan sample do not affect the global candidate comparison.
+  const key = `worldwide:${ecosystem}:${locale}:${limit}:${minSavings}:${Boolean(onlyFree)}:${search ?? ''}`
+  const cached = await withCache(key, REFRESH_SECONDS * 1000, async () => {
+    const signal = AbortSignal.timeout(45_000)
+    return requestContext.run(signal, async () => {
+      let cheap: PromiseSettledResult<Cached<Deal[]>> | undefined
+      let steamSeed: Deal[] = []
+      const explicitSteam = ecosystem === 'pc' && /^(?:steam:)?\d{1,10}$/i.test(search ?? '')
+      if (ecosystem === 'pc') {
+        ;[cheap] = await Promise.allSettled([getCheapSharkDeals(limit, 0, search)])
+        if (search) {
+          const discovered: Array<Pick<Deal, 'steamAppId'>> = [...cachedDeals(cheap, 'US')]
+          if (!explicitSteam) {
+            try {
+              const official = await withCache(`world-steam-search:${locale}:${search}`, REFRESH_SECONDS * 1000, async () => {
+                const query = new URLSearchParams({ term: search, l: steamLanguage(locale), cc: 'US' })
+                const response = await fetchJson<{ items?: Array<{ id?: number }> }>(`https://store.steampowered.com/api/storesearch/?${query}`)
+                if (!Array.isArray(response.items)) throw new Error('Steam search returned no verifiable catalogue response.')
+                return response.items.filter((item) => Number.isInteger(item.id) && item.id! > 0).slice(0, 8).map((item) => ({ steamAppId: String(item.id) }))
+              })
+              if (!official.stale) discovered.unshift(...official.value)
+            } catch { /* Existing CheapShark/featured discovery remains explicitly bounded. */ }
+          }
+          // Store search includes soundtracks and DLC: appdetails still must confirm type=game.
+          const [seed] = await Promise.allSettled([getSteamSearchDetails('US', locale, search, discovered, 4)])
+          steamSeed = cachedDeals(seed, 'US')
+        }
+      }
+      const countryParams = (checkedCountry: string) => ({ ...params, country: checkedCountry, minSavings: 0, regionSample: 0 })
+      const result = await scanWorldwide({
+        countries: WORLDWIDE_COUNTRIES,
+        supportedCountries: ecosystem === 'playstation' ? supportedPlayStationCountries() : undefined,
+        scope: /^(?:steam:|product:)/i.test(search ?? '') ? 'product-lookup' : search ? 'catalog-search' : 'catalog-sample',
+        signal, concurrency: 4,
+        loadCountry: async (checkedCountry, currentSignal) => {
+          if (ecosystem !== 'pc') return worldwideConsoleCountry({ ...countryParams(checkedCountry), ecosystem }, currentSignal)
+          if (explicitSteam) {
+            const lookup = await getSteamSearchDetails(checkedCountry, locale, search!, [], 1)
+            return { deals: cachedDeals({ status: 'fulfilled', value: lookup }, checkedCountry), sourceStatus: [sourceResultStatus('Steam exact regional product', { status: 'fulfilled', value: lookup }, `${lookup.value.length} current game prices verified directly in ${checkedCountry}; US availability is not required.`)] }
+          }
+          const sources: Array<{ name: string; loader: () => Promise<Cached<Deal[]>>; coverage: SourceStatus['coverage'] }> = [
+            { name: 'Steam specials', loader: () => getSteamSpecials(checkedCountry, locale, limit, 0, search), coverage: 'featured-sample' },
+            { name: 'GOG catalog', loader: () => getGogDeals(checkedCountry, locale, limit, 0, search, true), coverage: search ? 'catalog-search' : 'catalog-sample' },
+            { name: 'Epic giveaways', loader: () => getEpicDeals(checkedCountry, locale), coverage: 'catalog-sample' },
+          ]
+          const output: CountryOffers = { deals: [], sourceStatus: [] }
+          for (const source of sources) {
+            const [loaded] = await Promise.allSettled([source.loader()])
+            const deals = cachedDeals(loaded, checkedCountry).filter((deal) => titleMatches(deal.title, search))
+            output.deals.push(...deals)
+            output.sourceStatus.push(sourceResultStatus(source.name, loaded, `${deals.length} candidates in the bounded ${source.coverage}; full-price GOG search listings are included.`, source.coverage))
+          }
+          if (checkedCountry === 'US' && cheap) {
+            output.deals.push(...cachedDeals(cheap, 'US'), ...steamSeed)
+            output.sourceStatus.push(sourceResultStatus('CheapShark US reference', cheap, 'US quotes only; never substituted for other countries.', 'reference-us'))
+          }
+          return output
+        },
+        refineCountry: explicitSteam || ecosystem === 'playstation' || /^product:/i.test(search ?? '') ? undefined : async (checkedCountry, discovered, currentSignal) => {
+          if (ecosystem === 'pc') return worldwideSteamPrices(checkedCountry, locale, [...steamSeed, ...discovered])
+          const ids = [...new Set(discovered.map((deal) => deal.storeProductId).filter((id): id is string => Boolean(id)))].sort().slice(0, 60)
+          return worldwideConsoleCountry({ ...countryParams(checkedCountry), ecosystem: 'xbox' }, currentSignal, ids)
+        },
+      })
+      // Select the global price first; discount/free filters must not hide a cheaper full-price country.
+      result.deals = result.deals.filter((deal) => (deal.isFree || deal.savingsPercent >= minSavings) && (!onlyFree || deal.isFree)).slice(0, limit)
+      if (ecosystem === 'playstation') {
+        const rated = await enrichPlayStationWinnerRatings(result.deals)
+        result.sourceStatus.push(status('PlayStation winner ratings', true, `Official ratings verified for ${rated} of ${result.deals.length} global winners; at most 24 products and 8 seconds total.`))
+      }
+      return result
+    })
+  })
+  // An expired aggregate must never re-label old prices as current after a refresh failure.
+  const current = cached.stale ? [] : cached.value.deals.filter((deal) => verifiedWorldwideOffer(deal, deal.priceCountry ?? '') !== undefined)
+  // Keep existing intelligence filters usable without recording foreign quotes in the base country.
+  const history = await readPriceHistory()
+  const deals = [...new Set(current.map((deal) => deal.priceCountry!))].flatMap((quoteCountry) =>
+    enrichDealsWithIntelligence(current.filter((deal) => deal.priceCountry === quoteCountry), quoteCountry, history),
+  ).sort((a, b) => a.salePrice.usd! - b.salePrice.usd! || a.title.localeCompare(b.title))
+  const worldwide = cached.stale ? { ...cached.value.worldwide, failedCountries: [...WORLDWIDE_COUNTRIES], partial: true } : cached.value.worldwide
+  const summary: SourceStatus = { name: 'Worldwide price comparison', ok: !worldwide.partial && !cached.stale, updatedAt: cached.updatedAt,
+    message: `${worldwide.checkedCountries.length}/${worldwide.requestedCountries.length} countries checked; ${worldwide.failedCountries.length} failed or partial, ${worldwide.unsupportedCountries.length} unsupported. Lowest verified USD prices in retrieved edition/platform results. Discovery is bounded and may omit other products or regions.`,
+    stale: cached.stale, error: cached.error, coverage: search ? 'catalog-search' : 'catalog-sample' }
+  return { ecosystem, priceScope: 'worldwide', country, locale, updatedAt: cached.updatedAt, refreshSeconds: REFRESH_SECONDS,
+    deals, stores: cached.value.stores, regionalScans: [], marketScouts: [], worldwide,
+    metrics: metricsFor(deals, [], country, 'worldwide'), sourceStatus: [summary, ...cached.value.sourceStatus] }
+}
+
 export interface LoadRadarParams {
+  priceScope?: PriceScope
   onlyFree?: boolean
   ecosystem?: GameEcosystem
   country: string
@@ -1240,6 +1421,7 @@ export interface LoadRadarParams {
 
 export async function loadRadar(params: LoadRadarParams): Promise<RadarResponse> {
   const parsed = querySchema.parse(params)
+  if (parsed.priceScope === 'worldwide') return loadWorldwideRadar(parsed)
   if (parsed.ecosystem !== 'pc') return loadConsoleRadar({ ...parsed, ecosystem: parsed.ecosystem })
   const { country, locale, limit, minSavings, search, regionSample } = querySchema.parse(params)
   const sourceStatus: SourceStatus[] = []
@@ -1304,7 +1486,7 @@ export async function loadRadar(params: LoadRadarParams): Promise<RadarResponse>
   const providerLinks = allDeals.filter((deal) => deal.tags.includes('provider-redirect')).length
   sourceStatus.push(status('Destination links', true, `${providerLinks} required CheapShark redirects; remaining offers use store product links.`))
   const response: RadarResponse = {
-    ecosystem: 'pc', updatedAt: nowIso(), refreshSeconds: REFRESH_SECONDS, country, locale, deals: allDeals, stores,
+    ecosystem: 'pc', priceScope: 'country', updatedAt: nowIso(), refreshSeconds: REFRESH_SECONDS, country, locale, deals: allDeals, stores,
     regionalScans, marketScouts, metrics: metricsFor(allDeals, regionalScans, country), sourceStatus,
   }
   const providerResults = [cheapResult, epicResult, steamResult, gogResult]

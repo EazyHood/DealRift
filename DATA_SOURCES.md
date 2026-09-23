@@ -22,7 +22,15 @@ PlayStation ratings are checked for up to 24 returned products with concurrency 
 
 Rating values, when present, are official store user ratings normalized to a percentage, not Metacritic scores. Missing rating or expiry data remains unknown and is excluded by filters that require it. Product IDs isolate platforms and editions in the library, comparisons and history; a regional product ID may differ across storefronts. Old PC backups remain compatible.
 
-The free-only filter queries each console store’s public free-to-play collection when no search term is present, then verifies the actual public zero-price offer; it is not limited to the discount feed. Only the selected ecosystem is queried for a radar request. Watchlist checks query each saved game's ecosystem even while another platform is visible. Prices are cached for five minutes. Search and discovery are bounded and do not guarantee exhaustive catalog coverage. Console cross-country scanning and subscription library entitlement tracking are not implemented.
+The free-only filter queries each console store’s public free-to-play collection when no search term is present, then verifies the actual public zero-price offer; it is not limited to the discount feed. Only the selected ecosystem is queried for a radar request. Watchlist checks query each saved game's ecosystem even while another platform is visible. Prices are cached for five minutes. Search and discovery are bounded and do not guarantee exhaustive catalog coverage. Subscription library entitlement tracking is not implemented.
+
+## Worldwide price comparison
+
+The **Any country · lowest USD** mode compares the selected ecosystem across supported countries and returns the lowest current USD quote found for matching games/editions. It preserves the original storefront price, country and link; conversion does not turn a regional offer into a globally purchasable license. Successful country checks, unavailable countries and partial failures are reported separately. Catalog samples and title searches are bounded, so coverage does not imply every game or storefront was checked.
+
+Comparison requests use bounded concurrency and a five-minute cache. Candidates are checked without a minimum-discount restriction, then that filter is applied to the winners. Unknown exchange rates, stale data, future promotions, expired offers and foreign reference quotes cannot displace a verified current regional price. Worldwide results are not recorded as observations for the user's base country. Personal alerts and budget plans continue to use the saved base country.
+
+Steam title discovery in worldwide mode also uses the official public store search and validates the returned app IDs as games before querying regional prices. Steam and Xbox then check bounded batches of discovered product IDs across countries, including products without a discount. PlayStation uses country-specific catalog searches; regional versions are matched conservatively by official product ID or full title and console compatibility, without changing library ownership IDs. Missing or localized catalog entries can reduce the set of comparable results.
 
 ## Marketplace scouts
 

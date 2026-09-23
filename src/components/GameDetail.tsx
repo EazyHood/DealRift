@@ -5,6 +5,7 @@ import type { Deal, Language } from '../shared/dealTypes'
 import { libraryGameId, type GamePricePoint } from '../shared/libraryTypes'
 import { formatMoney } from '../lib/planner'
 import { dealStatusLabels } from '../lib/dealStatus'
+import { worldwidePriceLabel, type PriceScope } from '../lib/priceScope'
 import './Personal.css'
 
 export interface GameDetailProps {
@@ -12,12 +13,13 @@ export interface GameDetailProps {
   offers: Deal[]
   language: Language
   country: string
+  priceScope?: PriceScope
   onClose: () => void
   onWatch: (deal: Deal) => void
   watched: boolean
 }
 
-export function GameDetail({ deal, offers, language, country, onClose, onWatch, watched }: GameDetailProps) {
+export function GameDetail({ deal, offers, language, country, priceScope = 'country', onClose, onWatch, watched }: GameDetailProps) {
   const es = language === 'es'
   const dialog = useRef<HTMLDialogElement>(null)
   const [points, setPoints] = useState<GamePricePoint[]>([])
@@ -25,6 +27,7 @@ export function GameDetail({ deal, offers, language, country, onClose, onWatch, 
   const [error, setError] = useState(false)
   const [attempt, setAttempt] = useState(0)
   const gameKey = libraryGameId(deal)
+  const historyCountry = deal.priceCountry ?? country
   useEffect(() => {
     const element = dialog.current
     const previousFocus = document.activeElement as HTMLElement | null
@@ -36,13 +39,13 @@ export function GameDetail({ deal, offers, language, country, onClose, onWatch, 
     let cancelled = false
     const timeout = window.setTimeout(() => controller.abort(), 15000)
     setLoading(true); setError(false); setPoints([])
-    const query = new URLSearchParams({ gameKey, country })
+    const query = new URLSearchParams({ gameKey, country: historyCountry })
     void fetch(`/api/game-history?${query}`, { signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) throw new Error('History unavailable')
         const result: unknown = await response.json()
         const raw = result as { points?: unknown; gameKey?: unknown; country?: unknown }
-        if (!raw || raw.gameKey !== gameKey || raw.country !== country || !Array.isArray(raw.points)) throw new Error('Invalid history')
+        if (!raw || raw.gameKey !== gameKey || raw.country !== historyCountry || !Array.isArray(raw.points)) throw new Error('Invalid history')
         const valid = raw.points.filter((point): point is GamePricePoint => Boolean(point) && typeof point === 'object' &&
           typeof point.at === 'string' && Number.isFinite(Date.parse(point.at)) && typeof point.priceUsd === 'number' &&
           Number.isFinite(point.priceUsd) && point.priceUsd >= 0 && typeof point.source === 'string' && typeof point.free === 'boolean')
@@ -50,7 +53,7 @@ export function GameDetail({ deal, offers, language, country, onClose, onWatch, 
       }).catch(() => { if (!cancelled) setError(true) })
       .finally(() => { window.clearTimeout(timeout); if (!cancelled) setLoading(false) })
     return () => { cancelled = true; controller.abort(); window.clearTimeout(timeout) }
-  }, [gameKey, country, attempt])
+  }, [gameKey, historyCountry, attempt])
 
   const sameEdition = useMemo(() => [...new Map([deal, ...offers].filter((offer) => libraryGameId(offer) === gameKey).map((offer) => [offer.id, offer])).values()]
     .sort((a, b) => (a.salePrice.usd ?? Infinity) - (b.salePrice.usd ?? Infinity)), [deal, offers, gameKey])
@@ -67,17 +70,17 @@ export function GameDetail({ deal, offers, language, country, onClose, onWatch, 
 
   return <dialog ref={dialog} className="personal-dialog game-detail" aria-labelledby="game-detail-title" onCancel={(event) => { event.preventDefault(); onClose() }}>
     <header className="personal-heading">
-      <div><p className="personal-eyebrow">{es ? 'Ficha del juego' : 'Game detail'} · {country}</p><h2 id="game-detail-title">{deal.title}</h2><p>{deal.platform}</p></div>
+      <div><p className="personal-eyebrow">{es ? 'Ficha del juego' : 'Game detail'} · {es ? 'Precio de' : 'Price from'} {historyCountry}</p><h2 id="game-detail-title">{deal.title}</h2><p>{deal.platform}</p></div>
       <button type="button" className="personal-icon" onClick={onClose} aria-label={es ? 'Cerrar ficha' : 'Close detail'}><X size={20} /></button>
     </header>
     <div className="detail-overview">
       {deal.image ? <img src={deal.image} alt="" className="detail-cover" /> : null}
-      <div><span className="personal-muted">{deal.source}</span><strong className="detail-price">{formatMoney(deal.salePrice.amount, deal.salePrice.currency, language)}</strong>{warnings.length ? <ul className="personal-price-warnings">{warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul> : null}<p className="personal-muted">{es ? 'Observado' : 'Observed'}: {date(deal.freshness?.updatedAt ?? deal.detectedAt)}</p>
+      <div><span className="personal-muted">{deal.source}</span><strong className="detail-price">{priceScope === 'worldwide' ? worldwidePriceLabel(deal) : formatMoney(deal.salePrice.amount, deal.salePrice.currency, language)}</strong>{priceScope === 'worldwide' ? <p className="personal-muted">{formatMoney(deal.salePrice.amount, deal.salePrice.currency, language)} · {historyCountry}</p> : null}{warnings.length ? <ul className="personal-price-warnings">{warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul> : null}<p className="personal-muted">{es ? 'Observado' : 'Observed'}: {date(deal.freshness?.updatedAt ?? deal.detectedAt)}</p>
         <div className="personal-actions"><button type="button" className="personal-primary" onClick={() => onWatch(deal)} aria-pressed={watched}><Eye size={16} />{watched ? (es ? 'Vigilando' : 'Watching') : (es ? 'Vigilar juego' : 'Watch game')}</button><a className="personal-button" href={deal.url} target="_blank" rel="noreferrer"><ExternalLink size={16} />{es ? 'Ver en la tienda' : 'View at store'}</a></div>
       </div>
     </div>
     <section className="personal-section" aria-labelledby="detail-history-title">
-      <div className="personal-heading"><div><h3 id="detail-history-title">{es ? 'Historial observado en USD' : 'Observed USD history'}</h3><p>{es ? 'Precios recogidos por esta instalación, para esta edición y país.' : 'Prices collected by this installation, for this edition and country.'}</p></div><span className="personal-badge">{points.length} {es ? 'observaciones' : 'observations'}</span></div>
+      <div className="personal-heading"><div><h3 id="detail-history-title">{es ? 'Historial observado en USD' : 'Observed USD history'} · {historyCountry}</h3><p>{es ? 'Precios recogidos por esta instalación, para esta edición y el país indicado; no mezcla mínimos de otros países.' : 'Prices collected by this installation for this edition and listed country; lows from other countries are not mixed.'}</p></div><span className="personal-badge">{points.length} {es ? 'observaciones' : 'observations'}</span></div>
       {loading ? <div className="personal-skeleton" role="status">{es ? 'Cargando historial…' : 'Loading history…'}</div> : error ? <div className="personal-notice error" role="alert"><p>{es ? 'No se pudo cargar el historial. Tus favoritos siguen guardados.' : 'History could not load. Your library is still saved.'}</p><button type="button" onClick={() => setAttempt((value) => value + 1)}><RefreshCw size={15} />{es ? 'Reintentar' : 'Retry'}</button></div> : !points.length ? <div className="personal-empty"><h4>{es ? 'Aún estamos reuniendo evidencia' : 'Collecting evidence'}</h4><p>{es ? 'Comprueba este favorito en diferentes momentos para construir su historial. No hay un mínimo histórico verificado todavía.' : 'Check this favorite at different times to build its history. There is no verified historical low yet.'}</p></div> : <>
         <div className="personal-facts"><div><span>{es ? 'Mínimo de pago observado' : 'Observed paid low'}</span><strong>{low === undefined ? '—' : formatMoney(low, 'USD', language)}</strong></div><div><span>{es ? 'Primera observación' : 'First observation'}</span><strong>{date(points[0].at)}</strong></div><div><span>{es ? 'Oferta gratuita observada' : 'Free offer observed'}</span><strong>{points.some((point) => point.free) ? (es ? 'Sí' : 'Yes') : (es ? 'No registrada' : 'Not recorded')}</strong></div></div>
         <div className="detail-chart" role="img" aria-label={es ? `Historial de ${points.length} observaciones; mínimo de pago ${low ?? 'no disponible'} USD. Los datos también están en la tabla.` : `${points.length} price observations; paid low ${low ?? 'unavailable'} USD. Data also available in the table.`}>

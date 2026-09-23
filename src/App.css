@@ -238,6 +238,7 @@ button:disabled {
 }
 
 .control-band {
+  flex-wrap: wrap;
   gap: 12px;
   padding: 14px;
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -325,6 +326,28 @@ button:disabled {
 .savings-field input {
   width: 118px;
   accent-color: #ffc857;
+}
+
+.country-scope-field { flex: 1 1 430px; min-width: 350px; }
+.country-scope-field select { flex: 1; min-width: 0; max-width: 100%; min-height: 42px; font: inherit; font-size: 13px; }
+.worldwide-summary { margin: 12px 0; padding: 14px 16px; border: 1px solid #244940; border-radius: 8px; background: #091813; color: var(--text); }
+.worldwide-summary-heading { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px 20px; }
+.worldwide-summary-heading > strong, .worldwide-summary-heading > span { display: inline-flex; align-items: center; gap: 8px; }
+.worldwide-summary-heading > strong { color: var(--cyan); font-size: 13px; }
+.worldwide-summary-heading > span { font-size: 12px; }
+.worldwide-summary p { margin: 8px 0; color: #b3c3bc; font-size: 12px; line-height: 1.65; }
+.worldwide-summary small { color: #b3c3bc; font-size: 12px; }
+.worldwide-summary.is-partial { border-color: #665431; }
+.worldwide-summary.is-partial .worldwide-summary-heading > span { color: var(--amber); }
+.worldwide-summary summary { width: fit-content; min-height: 40px; padding: 10px 0; color: var(--text); font-size: 12px; cursor: pointer; }
+.worldwide-summary summary:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.deal-meta .worldwide-native-price { color: var(--muted); font-size: 12px; }
+.worldwide-native-price strong { color: var(--text); font-weight: 600; }
+@media (max-width: 820px) { .country-scope-field { min-width: 0; } }
+@media (max-width: 560px) {
+  .country-scope-field { display: grid; grid-template-columns: 18px minmax(0, 1fr); padding: 8px 12px; gap: 4px 8px; }
+  .country-scope-field select { grid-column: 1 / -1; width: 100%; }
+  .worldwide-summary-heading { align-items: flex-start; flex-direction: column; }
 }
 
 .metric-grid {

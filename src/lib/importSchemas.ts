@@ -46,6 +46,7 @@ export const importedSnapshotSchema = z.object({
 export const importedAlertSchema = z.object({ id: z.string().regex(/^[a-f0-9]{24}$/), gameId: z.string().min(1).max(300), title: text, message: text, price: money, currency, url: storeUrl, createdAt: date, read: z.boolean(), country: z.string().regex(/^[A-Z]{2}$/).optional() }).strict()
 export const importedSettingsSchema = z.record(z.string().regex(/^dealrift-[a-z0-9-]{1,70}$/), z.string().max(32768)).refine((settings) => {
   if (Object.keys(settings).length > 100) return false
+  if (settings['dealrift-price-scope'] !== undefined && !['country', 'worldwide'].includes(settings['dealrift-price-scope'])) return false
   for (const key of ['dealrift-background', 'dealrift-notifications', 'dealrift-low-power', 'dealrift-hide-owned']) if (settings[key] !== undefined && !['true', 'false'].includes(settings[key])) return false
   for (const key of ['dealrift-quiet-start', 'dealrift-quiet-end']) if (settings[key] !== undefined && settings[key] !== '' && !/^([01]\d|2[0-3]):[0-5]\d$/.test(settings[key])) return false
   return settings['dealrift-country'] === undefined || /^[A-Z]{2}$/.test(settings['dealrift-country'])

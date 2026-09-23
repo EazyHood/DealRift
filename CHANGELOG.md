@@ -4,6 +4,20 @@ All notable changes to DealRift are documented here. The project follows Semanti
 
 ## [Unreleased]
 
+## [1.4.0-beta.1] - 2026-09-23
+
+### Added
+
+- **Any country · lowest USD** in the country selector for PC, PlayStation and Xbox.
+- Current regional offer comparison with USD-first prices, the winning country and native price, and cheapest-first ordering.
+- Explicit country coverage and partial-source failure reporting, bounded concurrent requests and cached comparisons.
+- Persisted worldwide preference while retaining the base country for personal targets, alerts and planning.
+
+### Fixed
+
+- Regional comparisons reject stale, expired, unavailable and unconvertible offers instead of allowing them to become a misleading minimum.
+- Minimum-discount filtering runs after regional winner selection so a more expensive discounted offer cannot hide a cheaper full-price quote.
+
 ## [1.3.0-beta.1] - 2026-09-20
 
 ### Added
