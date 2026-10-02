@@ -4,6 +4,22 @@ All notable changes to DealRift are documented here. The project follows Semanti
 
 ## [Unreleased]
 
+## [1.5.0-beta.1] - 2026-10-01
+
+### Added
+
+- Artwork-led catalogue grid with a compact list option, clearer price hierarchy and responsive navigation.
+- Shared game artwork rendering that prefers larger Steam images and falls back to available sources or a readable placeholder.
+
+### Changed
+
+- Redesigned catalogue, game details, personal library, purchase plans, alerts and charts with warm charcoal surfaces, ivory text and a restrained apricot accent.
+- Replaced the animated 3D background, neon effects and decorative gradients with a quieter interface focused on games and prices.
+- Removed Three.js and Framer Motion dependencies; remaining CSS motion respects system preferences and the **Reduce motion** setting.
+- Updated the former low-power preference to **Reduce motion**, retaining saved preferences.
+- Updated the Electron runtime to 43.7.7.
+- Refreshed documentation and the desktop screenshot for the new interface.
+
 ## [1.4.0-beta.1] - 2026-09-23
 
 ### Added
@@ -87,7 +103,10 @@ All notable changes to DealRift are documented here. The project follows Semanti
 - Explainable offer intelligence with price observations, market rank, source confidence, regional advantage, urgency, and alternatives.
 - Portable Windows application with local API, bilingual interface, filters, pagination, charts, alerts, watchlist, and CSV export.
 
-[Unreleased]: https://github.com/EazyHood/DealRift/compare/v1.2.0-beta.1...HEAD
+[Unreleased]: https://github.com/EazyHood/DealRift/compare/v1.5.0-beta.1...HEAD
+[1.5.0-beta.1]: https://github.com/EazyHood/DealRift/releases/tag/v1.5.0-beta.1
+[1.4.0-beta.1]: https://github.com/EazyHood/DealRift/releases/tag/v1.4.0-beta.1
+[1.3.0-beta.1]: https://github.com/EazyHood/DealRift/releases/tag/v1.3.0-beta.1
 [1.2.0-beta.1]: https://github.com/EazyHood/DealRift/releases/tag/v1.2.0-beta.1
 [1.1.1-beta.1]: https://github.com/EazyHood/DealRift/releases/tag/v1.1.1-beta.1
 [1.1.0]: https://github.com/EazyHood/DealRift/commits/main

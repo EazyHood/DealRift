@@ -5,7 +5,6 @@ import App from './App.tsx'
 import { initializeLibrary } from './lib/personalLibrary'
 import type { LibraryState } from './shared/libraryTypes'
 import { AppBoundary } from './components/AppBoundary'
-import { MotionConfig } from 'framer-motion'
 
 export function Startup() {
   const [state, setState] = useState<LibraryState | null>(null)
@@ -30,6 +29,6 @@ export function Startup() {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <AppBoundary><MotionConfig reducedMotion="user"><Startup /></MotionConfig></AppBoundary>
+    <AppBoundary><Startup /></AppBoundary>
   </StrictMode>,
 )

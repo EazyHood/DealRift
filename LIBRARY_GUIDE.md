@@ -46,7 +46,9 @@ El comparador permite seleccionar ediciones y consultar ofertas, fechas, país y
 
 El plan de compra toma favoritos no poseídos con ofertas verificadas, ordena por prioridad y después por precio, y respeta el presupuesto en la moneda elegida. Explica las exclusiones y no garantiza la combinación matemática óptima. No compra ni modifica cuentas de tiendas.
 
-En **Preferencias**, el modo de bajo consumo desactiva el fondo animado y puedes ocultar juegos poseídos. El menú de actualizaciones abre las releases oficiales; todavía no hay actualización automática ni firma digital del ejecutable.
+El catálogo muestra las portadas de los juegos en cuadrícula. Activa **Compacto** para consultar las ofertas en filas con los mismos filtros. La biblioteca, el plan de compra, las comparaciones y las alertas comparten la nueva presentación.
+
+En **Preferencias**, **Reducir movimiento** limita las transiciones de la interfaz. También se respeta la preferencia de movimiento del sistema. La opción conserva el valor guardado del antiguo modo de bajo consumo. En esta sección puedes ocultar juegos poseídos. El menú de actualizaciones abre las releases oficiales; todavía no hay actualización automática ni firma digital del ejecutable.
 
 
 ## Consoles

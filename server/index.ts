@@ -41,9 +41,9 @@ import type {
 } from '../src/shared/dealTypes.js'
 
 const PORT = Number(process.env.PORT ?? 5174)
-const USER_AGENT = process.env.RADAR_USER_AGENT ?? 'DealRift/1.4 (https://github.com/EazyHood/DealRift)'
+const USER_AGENT = process.env.RADAR_USER_AGENT ?? 'DealRift/1.5 (https://github.com/EazyHood/DealRift)'
 const REFRESH_SECONDS = 300
-const APP_VERSION = process.env.DEALRIFT_VERSION ?? '1.4.0-beta.1'
+const APP_VERSION = process.env.DEALRIFT_VERSION ?? '1.5.0-beta.1'
 const dataDir = process.env.DEALRIFT_DATA_DIR ? path.resolve(process.env.DEALRIFT_DATA_DIR) : path.join(process.cwd(), 'data')
 const historyFile = path.join(dataDir, 'deal-history.json')
 const priceHistoryFile = path.join(dataDir, 'deal-price-history.json')

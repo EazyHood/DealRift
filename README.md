@@ -8,28 +8,28 @@
 [![CI](https://github.com/EazyHood/DealRift/actions/workflows/ci.yml/badge.svg)](https://github.com/EazyHood/DealRift/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/EazyHood/DealRift?include_prereleases&label=release)](https://github.com/EazyHood/DealRift/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-55e6c1.svg)](LICENSE)
-[![Windows x64](https://img.shields.io/badge/Windows-x64-2f80ed.svg)](https://github.com/EazyHood/DealRift/releases/download/v1.4.0-beta.1/DealRift-1.4.0-beta.1-portable.exe)
+[![Windows x64](https://img.shields.io/badge/Windows-x64-2f80ed.svg)](https://github.com/EazyHood/DealRift/releases/download/v1.5.0-beta.1/DealRift-1.5.0-beta.1-portable.exe)
 
-[![Descargar para Windows / Download for Windows (.exe)](https://img.shields.io/badge/Descargar_para_Windows-.exe_portable-2f80ed?style=for-the-badge&logo=windows)](https://github.com/EazyHood/DealRift/releases/download/v1.4.0-beta.1/DealRift-1.4.0-beta.1-portable.exe)
+[![Descargar para Windows / Download for Windows (.exe)](https://img.shields.io/badge/Descargar_para_Windows-.exe_portable-2f80ed?style=for-the-badge&logo=windows)](https://github.com/EazyHood/DealRift/releases/download/v1.5.0-beta.1/DealRift-1.5.0-beta.1-portable.exe)
 
-**[Descargar .exe / Download .exe — v1.4.0-beta.1](https://github.com/EazyHood/DealRift/releases/download/v1.4.0-beta.1/DealRift-1.4.0-beta.1-portable.exe)**
+**[Descargar .exe / Download .exe — v1.5.0-beta.1](https://github.com/EazyHood/DealRift/releases/download/v1.5.0-beta.1/DealRift-1.5.0-beta.1-portable.exe)**
 
-[SHA-256 checksum](https://github.com/EazyHood/DealRift/releases/download/v1.4.0-beta.1/SHA256SUMS.txt) | [Release notes](https://github.com/EazyHood/DealRift/releases/tag/v1.4.0-beta.1) | [All releases](https://github.com/EazyHood/DealRift/releases) | [Report a bug](https://github.com/EazyHood/DealRift/issues/new/choose) | [Data sources](DATA_SOURCES.md) | [Privacy](PRIVACY.md)
+[SHA-256 checksum](https://github.com/EazyHood/DealRift/releases/download/v1.5.0-beta.1/SHA256SUMS.txt) | [Release notes](https://github.com/EazyHood/DealRift/releases/tag/v1.5.0-beta.1) | [All releases](https://github.com/EazyHood/DealRift/releases) | [Report a bug](https://github.com/EazyHood/DealRift/issues/new/choose) | [Data sources](DATA_SOURCES.md) | [Privacy](PRIVACY.md)
 </div>
 
-> **Resumen en espanol:** DealRift compara ofertas reales, juegos gratis y precios regionales desde una interfaz disponible en espanol e ingles. **[Descarga aqui el `.exe` portable para Windows x64](https://github.com/EazyHood/DealRift/releases/download/v1.4.0-beta.1/DealRift-1.4.0-beta.1-portable.exe)**; no requiere instalador, terminal ni Node.js. El boton verde **Code > Download ZIP** descarga el codigo fuente, no la aplicacion.
+> **Resumen en español:** DealRift compara ofertas reales, juegos gratis y precios regionales desde una interfaz disponible en español e inglés. **[Descarga aquí el `.exe` portable para Windows x64](https://github.com/EazyHood/DealRift/releases/download/v1.5.0-beta.1/DealRift-1.5.0-beta.1-portable.exe)**; no requiere instalador, terminal ni Node.js. El botón verde **Code > Download ZIP** descarga el código fuente, no la aplicación.
 
-![DealRift desktop dashboard](screenshots/final-desktop.jpg)
+![DealRift 1.5 desktop catalogue with warm charcoal surfaces and game artwork](assets/screenshots/editorial-desktop.jpg)
 
 ## Download
 
 DealRift currently ships as a portable **Windows x64** application:
 
-1. **[Download DealRift-1.4.0-beta.1-portable.exe](https://github.com/EazyHood/DealRift/releases/download/v1.4.0-beta.1/DealRift-1.4.0-beta.1-portable.exe)**.
-2. Download [SHA256SUMS.txt](https://github.com/EazyHood/DealRift/releases/download/v1.4.0-beta.1/SHA256SUMS.txt) from the same release.
+1. **[Download DealRift-1.5.0-beta.1-portable.exe](https://github.com/EazyHood/DealRift/releases/download/v1.5.0-beta.1/DealRift-1.5.0-beta.1-portable.exe)**.
+2. Download [SHA256SUMS.txt](https://github.com/EazyHood/DealRift/releases/download/v1.5.0-beta.1/SHA256SUMS.txt) from the same release.
 3. Run the executable directly. It starts the UI and its private local API without a visible console.
 
-If you prefer the release page, open [v1.4.0-beta.1](https://github.com/EazyHood/DealRift/releases/tag/v1.4.0-beta.1), expand **Assets**, and choose the `.exe`. The **Source code (zip/tar.gz)** files do not contain the built app. The download links above point to this beta explicitly because GitHub's `releases/latest` endpoint excludes pre-releases.
+If you prefer the release page, open [v1.5.0-beta.1](https://github.com/EazyHood/DealRift/releases/tag/v1.5.0-beta.1), expand **Assets**, and choose the `.exe`. The **Source code (zip/tar.gz)** files do not contain the built app. The download links above point to this beta explicitly because GitHub's `releases/latest` endpoint excludes pre-releases.
 
 The public beta is not code signed yet, so Windows SmartScreen can display an unknown-publisher warning. Download only from this repository and verify the checksum:
 
@@ -53,13 +53,15 @@ The two hashes must match exactly.
 - Personal budget plans and an edition comparison workspace. Plans explain exclusions and use a deterministic priority-first strategy; they do not claim a mathematically optimal basket or unverified DLC contents.
 - Validated destinations: CheapShark offers retain the provider's required deal redirects; official feeds use validated product links.
 - Marketplace scouts for Eneba, CDKeys, Kinguin, G2A, GG.deals, AllKeyShop, and SteamDB, clearly labeled as searches rather than verified product listings.
-- Responsive animated interface with a Three.js radar background and compact expandable deal rows.
-
-<p align="center">
-  <img src="screenshots/alert-center-mobile.jpg" alt="DealRift mobile alert center" width="390">
-</p>
+- Artwork-led catalogue with warm charcoal surfaces, clear prices, a compact list option and responsive layouts. Motion respects system and in-app preferences.
 
 Read the [personal library guide](LIBRARY_GUIDE.md) for import formats, backups, targets, quiet hours and background monitoring.
+
+## Catalogue and library
+
+The default catalogue gives game artwork and prices room to breathe. Select **Compact** (**Compacto**) to switch to rows while keeping search, filters, saved games and price comparisons available. Open a game for its observed price history and store evidence.
+
+The personal library uses the same visual language for saved games, purchase plans, edition comparisons and alerts. In **Preferences**, choose **Reduce motion** (**Reducir movimiento**) to limit interface transitions. The operating system's reduced-motion preference is also respected.
 
 ## PlayStation and Xbox
 
