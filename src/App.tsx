@@ -1,12 +1,17 @@
 import { getGameEcosystem, libraryMatchesDeal } from './shared/gameIdentity'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { motion } from 'framer-motion'
 import {
   AlertTriangle,
   BarChart3,
   Bell,
   BellRing,
   BrainCircuit,
+  ArrowUpRight,
+  Bookmark,
+  Compass,
+  LayoutGrid,
+  List,
+  Monitor,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -32,7 +37,7 @@ import {
   Wifi,
   WifiOff,
   X,
-  Zap,
+
 } from 'lucide-react'
 import {
   Bar,
@@ -49,10 +54,9 @@ import {
   YAxis,
 } from 'recharts'
 import './App.css'
-import './compact.css'
-import { RadarCanvas } from './components/RadarCanvas'
 import { LibraryPanel } from './components/LibraryPanel'
 import { GameDetail } from './components/GameDetail'
+import { GameArtwork } from './components/GameArtwork'
 import { readSetting, usePersonalLibrary } from './lib/personalLibrary'
 import { nativePriceLabel, radarOfferExclusion, worldwidePriceLabel, worldwideUsd, type PriceScope } from './lib/priceScope'
 import { libraryGameId, type LibraryState, type LibraryAction } from './shared/libraryTypes'
@@ -404,6 +408,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all')
   const [activeView, setActiveView] = useState<DashboardView>('deals')
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false)
+  useEffect(() => { window.scrollTo({ top: 0, behavior: 'instant' }) }, [activeView])
   const [selectedStore, setSelectedStore] = useState('all')
   const [sortMode, setSortMode] = useState<SortMode>(() => readSetting('dealrift-sort-mode', 'value') as SortMode)
   const [pageSize, setPageSize] = useState(readPageSizeSetting)
@@ -431,6 +436,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
   const [alertFree, setAlertFree] = useState(() => readSetting('dealrift-alert-free', 'true') === 'true')
   const [now, setNow] = useState(Date.now)
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const resultsRef = useRef<HTMLDivElement>(null)
   const online = useOnlineStatus()
 
   const t = useCopy(language)
@@ -850,9 +856,8 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
   const connectionTone = !online ? 'offline' : error || dataIsStale || sourcesDegraded ? 'stale' : 'live'
   const connectionLabel = !online ? t('offline') : error || dataIsStale ? t('dataStale') : sourcesDegraded ? t('partialData') : t('online')
 
-  const pulse = data?.metrics.totalDeals ?? 20
   const dashboardTabs = [
-    { id: 'deals', icon: <Zap size={18} />, label: t('viewDeals'), meta: `${deals.length}` },
+    { id: 'deals', icon: <Compass size={19} />, label: language === 'es' ? 'Explorar' : 'Discover', meta: `${deals.length}` },
     { id: 'library', icon: <Gamepad2 size={18} />, label: t('personalLibrary'), meta: String(personal.state.games.length) },
     { id: 'regions', icon: <MapPin size={18} />, label: t('viewRegions'), meta: String(allScans.length) },
     { id: 'alerts', icon: <BellRing size={18} />, label: t('viewAlerts'), meta: String(alertMatches.length) },
@@ -860,19 +865,46 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
     { id: 'sources', icon: <ShieldCheck size={18} />, label: t('viewSources'), meta: String(data?.sourceStatus.length ?? 0) },
   ] satisfies Array<{ id: DashboardView; icon: React.ReactNode; label: string; meta: string }>
 
+  const goToPage = (page: number) => {
+    setCurrentPage(page)
+    window.requestAnimationFrame(() => {
+      resultsRef.current?.scrollIntoView({ block: 'start', behavior: 'instant' })
+      resultsRef.current?.focus({ preventScroll: true })
+    })
+  }
+
+  const currentSection = dashboardTabs.find((view) => view.id === activeView)!
+  const platformName = ecosystem === 'pc' ? 'PC' : ecosystem === 'playstation' ? 'PlayStation' : 'Xbox'
+
   return (
-    <>
-      <RadarCanvas pulse={pulse} enabled={personal.state.settings['dealrift-low-power'] !== 'true'} />
-    <main className="app-shell">
+<div className={`app-layout ${personal.state.settings['dealrift-low-power'] === 'true' ? 'reduce-motion' : ''}`}>
+      <a className="skip-link" href="#main-content">{language === 'es' ? 'Saltar al contenido' : 'Skip to content'}</a>
+      <aside className="sidebar">
+        <button type="button" className="brand-lockup" onClick={() => setActiveView('deals')} aria-label="DealRift">
+          <span className="brand-mark" aria-hidden="true">d.</span>
+          <span className="brand-wordmark">dealrift<span>.</span></span>
+        </button>
+        <span className="sidebar-label">{language === 'es' ? 'TU ESPACIO DE JUEGO' : 'YOUR GAMING SPACE'}</span>
+        <nav className="view-tabs" aria-label={t('sections')}>
+          {dashboardTabs.filter((view) => (ecosystem === 'pc' && priceScope === 'country') || view.id !== 'regions').map((view) => (
+            <button key={view.id} type="button" className={activeView === view.id ? 'active' : ''}
+              aria-pressed={activeView === view.id} onClick={() => setActiveView(view.id)}>
+              <span className="view-tab-icon" aria-hidden="true">{view.icon}</span>
+              <strong>{view.label}</strong><small>{view.meta}</small>
+            </button>
+          ))}
+        </nav>
+        <div className="sidebar-bottom">
+          <div className="sidebar-note"><Bookmark size={19} aria-hidden="true" /><p>{language === 'es' ? 'Menos buscar. Más jugar.' : 'Less searching. More playing.'}</p><span>{language === 'es' ? 'Tu biblioteca empieza con un buen hallazgo.' : 'A great find is the start of your library.'}</span></div>
+          <span className="sidebar-edition">DEALRIFT <span>PC / PS / XBOX</span></span>
+        </div>
+      </aside>
+    <main className="app-shell" id="main-content" tabIndex={-1}>
       <header className="topbar">
-        <div className="brand-lockup">
-          <div className="brand-mark">
-            <Radar size={25} />
-          </div>
-          <div>
-            <h1>{t('appName')}</h1>
-            <p>{t('appSubtitle')}</p>
-          </div>
+        <div className="page-heading">
+          <p className="eyebrow">{currentSection.label}<span>/</span>{platformName}</p>
+          <h1>{activeView === 'deals' ? (language === 'es' ? 'Tu próxima partida.' : 'Your next great game.') : currentSection.label}</h1>
+          <p>{activeView === 'deals' ? (language === 'es' ? 'Buenos juegos. Precios que merecen la pena.' : 'Great games. Prices worth finding.') : (language === 'es' ? 'Todo lo que necesitas para elegir mejor.' : 'Everything you need to choose well.')}</p>
         </div>
 
         <div className="top-actions">
@@ -887,23 +919,23 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
             <RefreshCw size={18} className={loading ? 'spin' : ''} />
             <span>{t('refresh')}</span>
           </button>
-          <button type="button" className={`icon-text ${autoRefresh ? 'is-on' : ''}`} aria-pressed={autoRefresh} onClick={() => setAutoRefresh((value) => !value)}>
+          <button type="button" className={`icon-text utility-action ${autoRefresh ? 'is-on' : ''}`} aria-pressed={autoRefresh} aria-label={t('autoRefresh')} title={t('autoRefresh')} onClick={() => setAutoRefresh((value) => !value)}>
             <Clock3 size={18} />
             <span>{t('autoRefresh')}</span>
           </button>
-          <button type="button" className={`icon-text ${notificationReady ? 'is-on' : ''}`} onClick={enableNotifications}>
+          <button type="button" className={`icon-text utility-action ${notificationReady ? 'is-on' : ''}`} onClick={enableNotifications} aria-label={notificationReady ? t('notificationsOn') : t('notifications')} title={notificationReady ? t('notificationsOn') : t('notifications')}>
             {notificationReady ? <BellRing size={18} /> : <Bell size={18} />}
             <span>{notificationReady ? t('notificationsOn') : t('notifications')}</span>
           </button>
-          <button type="button" className="icon-button" onClick={() => setLanguage(language === 'es' ? 'en' : 'es')} title={t('language')}>
-            <Languages size={20} />
+          <button type="button" className="icon-button" onClick={() => setLanguage(language === 'es' ? 'en' : 'es')} title={t('language')} aria-label={t('language')}>
+            <Languages size={18} /><span className="language-code">{language.toUpperCase()}</span>
           </button>
         </div>
       </header>
 
       <section className="platform-band" aria-label={language === 'es' ? 'Plataforma de juegos' : 'Gaming platform'}>
         <div className="platform-switch" role="group" aria-label={language === 'es' ? 'Elegir plataforma' : 'Choose platform'}>
-          {(['pc', 'playstation', 'xbox'] as const).map((platform) => <button key={platform} type="button" aria-pressed={ecosystem === platform} onClick={() => switchEcosystem(platform)}><Gamepad2 size={17} />{platform === 'pc' ? 'PC' : platform === 'playstation' ? 'PlayStation' : 'Xbox'}</button>)}
+          {(['pc', 'playstation', 'xbox'] as const).map((platform) => <button key={platform} type="button" aria-pressed={ecosystem === platform} onClick={() => switchEcosystem(platform)}>{platform === 'pc' ? <Monitor size={17} /> : <Gamepad2 size={17} />}{platform === 'pc' ? 'PC' : platform === 'playstation' ? 'PlayStation' : 'Xbox'}</button>)}
         </div>
         {ecosystem !== 'pc' ? <label className="compact-select"><span>{language === 'es' ? 'Consola' : 'Console'}</span><select aria-label={language === 'es' ? 'Filtrar consola' : 'Filter console'} value={device} onChange={(event) => setDevice(event.target.value)}><option value="all">{t('all')}</option>{(ecosystem === 'playstation' ? [['ps5', 'PS5'], ['ps4', 'PS4']] : [['series', 'Xbox Series X|S'], ['xbox one', 'Xbox One']]).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label> : null}
         <span className="platform-caption">{priceScope === 'worldwide' ? t('worldwideHeading') : ecosystem === 'pc' ? (language === 'es' ? 'Tiendas y ofertas para ordenador' : 'PC stores and offers') : (language === 'es' ? 'Tienda oficial · Precios del país seleccionado' : 'Official store · Selected country prices')}</span>
@@ -919,14 +951,14 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
               if (event.key === 'Escape' && (query || submittedQuery)) clearSearch()
             }}
             aria-label={t('search')}
-            placeholder={ecosystem === 'pc' ? t('searchPlaceholder') : (language === 'es' ? 'Busca un juego o product:ID…' : 'Search a game or product:ID…')}
+            placeholder={language === 'es' ? 'Busca tu próximo juego…' : 'Find your next game…'}
           />
           {query || submittedQuery ? (
             <button type="button" className="clear-search" onClick={clearSearch} title={t('clearSearch')} aria-label={t('clearSearch')}>
               <X size={16} />
             </button>
           ) : null}
-          <button type="submit">{t('scan')}</button>
+          <kbd aria-hidden="true">/</kbd><button type="submit">{language === 'es' ? 'Buscar' : 'Search'}<ArrowUpRight size={16} aria-hidden="true" /></button>
         </form>
 
         <label className="field country-scope-field">
@@ -942,12 +974,23 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
           </select>
         </label>
 
+      </section>
+
+      <div className="catalog-context">
+      {activeView === 'deals' ? <section className="metric-grid">
+        <Metric icon={<Gamepad2 size={22} />} label={t('totalDeals')} value={String(filteredMetrics.total)} />
+        <Metric icon={<Gift size={22} />} label={t('freeGames')} value={String(filteredMetrics.free)} tone="green" />
+        {ecosystem === 'pc' ? <Metric icon={<Clock3 size={22} />} label={t('upcomingGames')} value={String(filteredMetrics.upcoming)} /> : null}
+        <Metric icon={<TrendingDown size={22} />} label={t('maxSavings')} value={formatPercent(filteredMetrics.maxSavings)} tone="pink" />
+        {ecosystem === 'pc' ? <Metric icon={<MapPin size={22} />} label={t('regionFinds')} value={String(filteredMetrics.regions)} tone="amber" /> : null}
+      </section> : null}
+
         <label className="field savings-field">
           <SlidersHorizontal size={16} />
           <span>{t('minSavings')}: {minSavings}%</span>
           <input type="range" min="0" max="95" step="5" value={minSavings} onChange={(event) => setMinSavings(Number(event.target.value))} />
         </label>
-      </section>
+      </div>
 
       {priceScope === 'worldwide' ? <section className={`worldwide-summary ${data?.worldwide?.partial ? 'is-partial' : ''}`} aria-label={t('worldwideHeading')}>
         <div className="worldwide-summary-heading"><strong><Globe2 size={17} />{t('worldwideHeading')}</strong><span role="status" aria-live="polite">{loading ? <><RefreshCw size={15} className="spin" />{t('worldwideLoading')}</> : data?.worldwide ? <>{data.worldwide.checkedCountries.length}/{data.worldwide.requestedCountries.length} {t('worldwideCoverage')}{data.worldwide.partial ? ` · ${t('worldwidePartial')}` : ''}</> : t('worldwideNoCoverage')}</span></div>
@@ -955,33 +998,12 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
         <small>{t('worldwideBaseNote')}: <strong>{country}</strong>.</small>
         {data?.worldwide && !loading ? <details><summary>{language === 'es' ? 'Ver cobertura por país' : 'View country coverage'}</summary><p>{language === 'es' ? 'Comprobados' : 'Checked'}: {data.worldwide.checkedCountries.join(', ') || '—'}</p>{data.worldwide.failedCountries.length ? <p>{language === 'es' ? 'No se pudieron comprobar' : 'Could not check'}: {data.worldwide.failedCountries.join(', ')}</p> : null}{data.worldwide.unsupportedCountries?.length ? <p>{language === 'es' ? 'Sin cobertura en esta tienda' : 'Not supported by this store'}: {data.worldwide.unsupportedCountries.join(', ')}</p> : null}</details> : null}
       </section> : null}
-      {ecosystem !== 'pc' ? <p className="console-coverage-note">{language === 'es' ? 'Catálogo y búsquedas con un número limitado de resultados. Las valoraciones solo se filtran cuando la tienda las publica; no incluyen beneficios de PS Plus o Game Pass.' : 'Catalog and searches return a limited set of results. Rating filters use published store ratings only; PS Plus or Game Pass benefits are excluded.'} {ecosystem === 'playstation' ? (language === 'es' ? 'PlayStation no publica fechas de finalización en esta fuente.' : 'PlayStation does not publish end dates in this source.') : ''}</p> : null}
-      <section className="metric-grid">
-        <Metric icon={<Gamepad2 size={22} />} label={t('totalDeals')} value={String(filteredMetrics.total)} />
-        <Metric icon={<Gift size={22} />} label={t('freeGames')} value={String(filteredMetrics.free)} tone="green" />
-        {ecosystem === 'pc' ? <Metric icon={<Clock3 size={22} />} label={t('upcomingGames')} value={String(filteredMetrics.upcoming)} /> : null}
-        <Metric icon={<TrendingDown size={22} />} label={t('maxSavings')} value={formatPercent(filteredMetrics.maxSavings)} tone="pink" />
-        {ecosystem === 'pc' ? <Metric icon={<MapPin size={22} />} label={t('regionFinds')} value={String(filteredMetrics.regions)} tone="amber" /> : null}
-      </section>
-
-      <nav className="view-tabs" aria-label={t('sections')}>
-          {dashboardTabs.filter((view) => (ecosystem === 'pc' && priceScope === 'country') || view.id !== 'regions').map((view) => (
-          <button
-            key={view.id}
-            type="button"
-            className={activeView === view.id ? 'active' : ''}
-            aria-pressed={activeView === view.id}
-            onClick={() => setActiveView(view.id)}
-          >
-            <span className="view-tab-icon">{view.icon}</span>
-            <span>
-              <strong>{view.label}</strong>
-              <small>{view.meta}</small>
-            </span>
-          </button>
-        ))}
-      </nav>
-
+      {ecosystem !== 'pc' ? <details className="console-coverage-note"><summary>{language === 'es' ? 'Sobre este catálogo' : 'About this catalogue'}</summary><p>{language === 'es' ? 'Catálogo y búsquedas con un número limitado de resultados. Las valoraciones solo se filtran cuando la tienda las publica; no incluyen beneficios de PS Plus o Game Pass.' : 'Catalog and searches return a limited set of results. Rating filters use published store ratings only; PS Plus or Game Pass benefits are excluded.'} {ecosystem === 'playstation' ? (language === 'es' ? 'PlayStation no publica fechas de finalización en esta fuente.' : 'PlayStation does not publish end dates in this source.') : ''}</p></details> : null}
+      {!online || dataIsStale ? <div className="source-warning" role="status">
+        <WifiOff size={16} aria-hidden="true" />
+        <span>{!online ? t('offline') : t('dataStale')}. {language === 'es' ? 'Los precios pueden haber cambiado desde la última actualización.' : 'Prices may have changed since the last update.'}</span>
+        <button type="button" onClick={refresh} disabled={loading}>{t('retry')}</button>
+      </div> : null}
       {error ? (
         <div className="error-line" role="alert">
           <AlertTriangle size={18} />
@@ -1016,7 +1038,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
               <div className="filter-actions">
                 <label className="compact-select">
                   <Store size={16} />
-                  <select value={selectedStore} onChange={(event) => setSelectedStore(event.target.value)}>
+                  <select aria-label={t('store')} value={selectedStore} onChange={(event) => setSelectedStore(event.target.value)}>
                     <option value="all">{t('store')}: {t('all')}</option>
                     {storeOptions.map((store) => (
                       <option key={store.name} value={store.name}>
@@ -1028,7 +1050,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
 
                 <label className="compact-select">
                   <BarChart3 size={16} />
-                  <select value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)}>
+                  <select aria-label={t('sort')} value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)}>
                     {sortModes.filter((mode) => (ecosystem === 'pc' && priceScope === 'country') || mode !== 'regional').map((mode) => (
                       <option key={mode} value={mode}>
                         {t('sort')}: {t(mode)}
@@ -1049,11 +1071,11 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
                 </button>
 
                 <button type="button" className={`filter-toggle ${compactMode ? 'active' : ''}`} aria-pressed={compactMode} onClick={() => setCompactMode((value) => !value)}>
-                  <Gamepad2 size={16} />
+                  {compactMode ? <LayoutGrid size={16} /> : <List size={16} />}
                   <span>{t('compactMode')}</span>
                 </button>
 
-                <button type="button" className="filter-toggle" onClick={() => downloadDealsCsv(deals)} disabled={!deals.length} title={t('exportCsv')}>
+                <button type="button" className="filter-toggle export-action" aria-label={t('exportCsv')} onClick={() => downloadDealsCsv(deals)} disabled={!deals.length} title={t('exportCsv')}>
                   <Download size={16} />
                   <span>{t('exportCsv')}</span>
                 </button>
@@ -1071,35 +1093,6 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
                 ))}
               </div>
             ) : null}
-
-            <section className="pagination-bar">
-              <label className="compact-select page-size-select">
-                <span>{t('perPage')}</span>
-                <select value={pageSize} onChange={(event) => setPageSize(Number(event.target.value))}>
-                  {pageSizeOptions.map((size) => (
-                    <option key={size} value={size}>
-                      {size}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <div className="page-controls">
-                <button type="button" onClick={() => setCurrentPage(1)} disabled={currentPage <= 1} title={t('firstPage')}>
-                  1
-                </button>
-                <button type="button" onClick={() => setCurrentPage((page) => Math.max(1, page - 1))} disabled={currentPage <= 1} title={t('previous')}>
-                  <ChevronLeft size={17} />
-                </button>
-                <span>{t('page')} {currentPage} / {totalPages}</span>
-                <button type="button" onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))} disabled={currentPage >= totalPages} title={t('next')}>
-                  <ChevronRight size={17} />
-                </button>
-                <button type="button" onClick={() => setCurrentPage(totalPages)} disabled={currentPage >= totalPages} title={t('lastPage')}>
-                  {totalPages}
-                </button>
-              </div>
-            </section>
 
             {showAdvancedFilters && dealHighlights.length ? <DealHighlights deals={dealHighlights} priceScope={priceScope} t={t} /> : null}
 
@@ -1158,11 +1151,11 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
             ) : null}
           </div>
 
-          <div className="deal-column">
-            <SectionTitle icon={<Zap size={19} />} label={priceScope === 'worldwide' ? t('worldwideHeading') : t('dealFeed')} meta={data ? `${t('updated')} ${formatTime(data.updatedAt)}` : priceScope === 'worldwide' ? t('scanningRegions') : t('loading')} />
-            <div className="deal-list">
+          <div className="deal-column" ref={resultsRef} tabIndex={-1} role="region" aria-label={language === 'es' ? 'Resultados' : 'Results'}>
+            <SectionTitle icon={<LayoutGrid size={17} />} label={submittedQuery ? (language === 'es' ? `Resultados para “${submittedQuery}”` : `Results for “${submittedQuery}”`) : priceScope === 'worldwide' ? t('worldwideHeading') : (language === 'es' ? 'Para tu próxima sesión' : 'For your next session')} meta={data ? `${t('updated')} ${formatTime(data.updatedAt)}` : priceScope === 'worldwide' ? t('scanningRegions') : t('loading')} />
+            <div className="deal-list" aria-busy={loading}>
               {loading && !data ? (
-                Array.from({ length: 4 }, (_, index) => <DealSkeleton key={`skeleton-${index}`} />)
+                Array.from({ length: 3 }, (_, index) => <DealSkeleton key={`skeleton-${index}`} featured={index === 0} />)
               ) : pagedDeals.length ? (
                 pagedDeals.map((deal, index) => (
                   <DealRow
@@ -1189,6 +1182,35 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
               )}
             </div>
           </div>
+            <section className="pagination-bar" aria-label={t('page')}>
+              <label className="compact-select page-size-select">
+                <span>{t('perPage')}</span>
+                <select value={pageSize} onChange={(event) => setPageSize(Number(event.target.value))}>
+                  {pageSizeOptions.map((size) => (
+                    <option key={size} value={size}>
+                      {size}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <div className="page-controls">
+                <button type="button" onClick={() => goToPage(1)} disabled={currentPage <= 1} title={t('firstPage')}>
+                  1
+                </button>
+                <button type="button" onClick={() => goToPage(Math.max(1, currentPage - 1))} disabled={currentPage <= 1} title={t('previous')}>
+                  <ChevronLeft size={17} />
+                </button>
+                <span>{t('page')} {currentPage} / {totalPages}</span>
+                <button type="button" onClick={() => goToPage(Math.min(totalPages, currentPage + 1))} disabled={currentPage >= totalPages} title={t('next')}>
+                  <ChevronRight size={17} />
+                </button>
+                <button type="button" onClick={() => goToPage(totalPages)} disabled={currentPage >= totalPages} title={t('lastPage')}>
+                  {totalPages}
+                </button>
+              </div>
+            </section>
+
         </section>
       ) : null}
 
@@ -1218,13 +1240,13 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
               <div className="chart-shell region-chart">
                 <ResponsiveContainer width="100%" height={340}>
                   <BarChart data={regionChart} margin={{ top: 16, right: 18, left: -10, bottom: 0 }}>
-                    <CartesianGrid stroke="rgba(255,255,255,.08)" vertical={false} />
-                    <XAxis dataKey="country" stroke="#91a1aa" fontSize={12} tickLine={false} axisLine={false} />
-                    <YAxis stroke="#91a1aa" fontSize={12} tickLine={false} axisLine={false} />
-                    <Tooltip content={<ChartTooltip />} cursor={{ fill: 'rgba(18,247,214,.08)' }} />
-                    <Bar dataKey="usd" radius={[4, 4, 0, 0]}>
+                    <CartesianGrid stroke="var(--border)" vertical={false} />
+                    <XAxis dataKey="country" stroke="var(--muted)" fontSize={12} tickLine={false} axisLine={false} />
+                    <YAxis stroke="var(--muted)" fontSize={12} tickLine={false} axisLine={false} />
+                    <Tooltip content={<ChartTooltip />} cursor={{ fill: 'var(--surface-hover)' }} />
+                    <Bar isAnimationActive={false} dataKey="usd" radius={[4, 4, 0, 0]}>
                       {regionChart.map((entry) => (
-                        <Cell key={entry.country} fill={entry.delta < -20 ? '#61e294' : entry.delta < 0 ? '#12f7d6' : '#ff3d6e'} />
+                        <Cell key={entry.country} fill={entry.delta < -20 ? 'var(--green)' : entry.delta < 0 ? 'var(--accent)' : 'var(--pink)'} />
                       ))}
                     </Bar>
                   </BarChart>
@@ -1272,11 +1294,11 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
             <div className="chart-shell analytics-chart">
               <ResponsiveContainer width="100%" height={280}>
                 <BarChart data={storeChart} layout="vertical" margin={{ top: 6, right: 24, left: 2, bottom: 0 }}>
-                  <CartesianGrid stroke="rgba(255,255,255,.08)" horizontal={false} />
-                  <XAxis type="number" stroke="#91a1aa" fontSize={11} tickLine={false} axisLine={false} />
-                  <YAxis type="category" dataKey="store" width={110} stroke="#91a1aa" fontSize={11} tickLine={false} axisLine={false} />
+                  <CartesianGrid stroke="var(--border)" horizontal={false} />
+                  <XAxis type="number" stroke="var(--muted)" fontSize={11} tickLine={false} axisLine={false} />
+                  <YAxis type="category" dataKey="store" width={110} stroke="var(--muted)" fontSize={11} tickLine={false} axisLine={false} />
                   <Tooltip content={<ChartTooltip />} />
-                  <Bar dataKey="savings" fill="#ffc857" radius={[0, 4, 4, 0]} />
+                  <Bar isAnimationActive={false} dataKey="savings" fill="var(--amber)" radius={[0, 4, 4, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -1287,11 +1309,11 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
             <div className="chart-shell analytics-chart">
               <ResponsiveContainer width="100%" height={250}>
                 <ScatterChart margin={{ top: 10, right: 12, bottom: 8, left: -18 }}>
-                  <CartesianGrid stroke="rgba(255,255,255,.07)" />
-                  <XAxis type="number" dataKey="savings" name={t('savings')} stroke="#91a1aa" fontSize={10} />
-                  <YAxis type="number" dataKey="signal" name={t('signal')} stroke="#91a1aa" fontSize={10} />
+                  <CartesianGrid stroke="var(--border)" />
+                  <XAxis type="number" dataKey="savings" name={t('savings')} stroke="var(--muted)" fontSize={10} />
+                  <YAxis type="number" dataKey="signal" name={t('signal')} stroke="var(--muted)" fontSize={10} />
                   <Tooltip content={<ChartTooltip />} cursor={{ strokeDasharray: '3 3' }} />
-                  <Scatter data={signalChart} fill="#ff3d6e" />
+                  <Scatter isAnimationActive={false} data={signalChart} fill="var(--pink)" />
                 </ScatterChart>
               </ResponsiveContainer>
             </div>
@@ -1302,13 +1324,13 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
             <div className="chart-shell analytics-chart">
               <ResponsiveContainer width="100%" height={250}>
                 <LineChart data={historyChart} margin={{ top: 8, right: 12, bottom: 0, left: -20 }}>
-                  <CartesianGrid stroke="rgba(255,255,255,.07)" />
-                  <XAxis dataKey="time" stroke="#91a1aa" fontSize={10} tickLine={false} axisLine={false} />
-                  <YAxis stroke="#91a1aa" fontSize={10} tickLine={false} axisLine={false} />
+                  <CartesianGrid stroke="var(--border)" />
+                  <XAxis dataKey="time" stroke="var(--muted)" fontSize={10} tickLine={false} axisLine={false} />
+                  <YAxis stroke="var(--muted)" fontSize={10} tickLine={false} axisLine={false} />
                   <Tooltip content={<ChartTooltip />} />
-                  <Line type="monotone" dataKey="deals" stroke="#12f7d6" strokeWidth={2} dot={false} />
-                  <Line type="monotone" dataKey="free" stroke="#61e294" strokeWidth={2} dot={false} />
-                  <Line type="monotone" dataKey="regions" stroke="#ffc857" strokeWidth={2} dot={false} />
+                  <Line isAnimationActive={false} type="monotone" dataKey="deals" stroke="var(--accent)" strokeWidth={2} dot={false} />
+                  <Line isAnimationActive={false} type="monotone" dataKey="free" stroke="var(--green)" strokeWidth={2} dot={false} />
+                  <Line isAnimationActive={false} type="monotone" dataKey="regions" stroke="var(--amber)" strokeWidth={2} dot={false} />
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -1352,7 +1374,7 @@ function App({ initialLibrary }: { initialLibrary: LibraryState }) {
       {detailDeal ? <GameDetail deal={detailDeal} offers={data?.deals ?? []} language={language} country={country} priceScope={priceScope}
         onClose={() => setDetailDeal(null)} onWatch={toggleWatch} watched={watchlist.some((game) => libraryMatchesDeal(game, detailDeal))} /> : null}
     </main>
-    </>
+    </div>
   )
 }
 
@@ -1383,9 +1405,9 @@ function DealHighlights({ deals, priceScope, t }: DealHighlightsProps) {
   )
 }
 
-function DealSkeleton() {
+function DealSkeleton({ featured = false }: { featured?: boolean }) {
   return (
-    <div className="deal-row deal-skeleton" aria-hidden="true">
+    <div className={`deal-row deal-skeleton ${featured ? 'is-featured' : ''}`} aria-hidden="true">
       <div className="skeleton-cover" />
       <div className="skeleton-lines">
         <span />
@@ -1399,11 +1421,11 @@ function DealSkeleton() {
 
 function Metric({ icon, label, value, tone }: MetricProps) {
   return (
-    <motion.div className={`metric ${tone ?? ''}`} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+    <div className={`metric ${tone ?? ''}`}>
       <div className="metric-icon">{icon}</div>
       <span>{label}</span>
       <strong>{value}</strong>
-    </motion.div>
+    </div>
   )
 }
 
@@ -1538,22 +1560,18 @@ function DealRow({ deal, country, priceScope, index, isWatched, isScanning, alte
   }
 
   return (
-    <motion.article
-      className={`deal-row ${expanded ? 'expanded' : ''}`}
-      initial={{ opacity: 0, y: 18 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: Math.min(index * 0.025, 0.3) }}
-    >
-      <div className="cover-wrap">
-        {deal.image ? <img src={deal.image} alt="" loading="lazy" /> : <div className="cover-fallback"><Gamepad2 size={28} /></div>}
-        <span className={`score-badge ${deal.intelligence?.verdict ?? ''}`} title={t('intelligenceScore')}>{intelligenceScore(deal)}</span>
-      </div>
+    <article className={`deal-row ${index === 0 ? 'is-featured' : ''} ${expanded ? 'expanded' : ''}`}>
+      <button type="button" className="cover-wrap" onClick={() => onOpenDetail(deal)} aria-label={`${t('gameSheet')}: ${deal.title}`}>
+        <GameArtwork image={deal.image} title={deal.title} eager={index < 3} />
+        <span className="cover-source">{deal.source}</span>
+        <span className="cover-open" aria-hidden="true"><ArrowUpRight size={20} /></span>
+      </button>
 
       <div className="deal-body">
         <div className="deal-heading">
           <div>
             <h3><button type="button" className="game-title-button" onClick={() => onOpenDetail(deal)}>{deal.title}</button></h3>
-            <p>{deal.source} - {deal.platform}</p>
+            <p className="game-platform"><span className="compact-store">{deal.source} · </span>{deal.platform}</p>
           </div>
           <div className="deal-status">
             {deal.intelligence ? <span className={`verdict ${deal.intelligence.verdict}`}>{verdictLabel(deal.intelligence.verdict, t)}</span> : null}
@@ -1566,9 +1584,9 @@ function DealRow({ deal, country, priceScope, index, isWatched, isScanning, alte
           {deal.freshness?.stale || deal.confidence === 'fallback' ? <span className="data-label">{t('cachedPrice')}</span> : null}
           {priceScope === 'worldwide' ? <span className="worldwide-native-price">{nativePriceLabel(deal)} · {t('worldwideQuoteCountry')} <strong>{deal.priceCountry}</strong></span> : deal.priceCountry && deal.priceCountry !== country ? <span className="data-label">{t('foreignPrice')}: {deal.priceCountry}</span> : null}
           {deal.normalPrice && !deal.isFree && priceScope === 'country' ? <span className="price-before">{deal.normalPrice.formatted}</span> : null}
-          <span className="save-pill">{formatPercent(deal.savingsPercent)}</span>
+          {deal.savingsPercent > 0 ? <span className="save-pill">−{formatPercent(deal.savingsPercent)}</span> : null}
           {deal.isFree ? <span className="free-pill">{deal.startsAt && new Date(deal.startsAt) > new Date() ? t('upcoming') : t('claimNow')}</span> : null}
-          {deal.savingsPercent >= 80 && !deal.isFree ? <span className="hot-pill">{t('deepDiscount')}</span> : null}
+
           {isEndingSoon(deal) ? <span className="time-left">{t('endingSoon')}</span> : null}
           {timeLeft ? <span className="time-left"><Clock3 size={13} />{t('timeLeft')} {timeLeft}</span> : null}
           {showUsd ? <span className="usd-normalized">~${normalizedUsd.toFixed(2)} {t('usdApprox')}</span> : null}
@@ -1586,7 +1604,7 @@ function DealRow({ deal, country, priceScope, index, isWatched, isScanning, alte
         ) : null}
 
         {expanded ? (
-          <motion.div className="deal-details" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}>
+          <div className="deal-details">
             <IntelligencePanel deal={deal} alternatives={alternatives} t={t} />
             <div className="deal-detail-head">
               <span><ExternalLink size={13} />{linkHost(deal.url) === 'www.cheapshark.com' ? t('providerRedirect') : directLink ? t('directLink') : t('storeSearch')} - {linkHost(deal.url)}</span>
@@ -1604,26 +1622,24 @@ function DealRow({ deal, country, priceScope, index, isWatched, isScanning, alte
                 {deal.notes.slice(0, 2).map((note) => <li key={note}>{note}</li>)}
               </ul>
             ) : null}
-          </motion.div>
+          </div>
         ) : null}
       </div>
 
       <div className="deal-actions">
         <a className="primary-link" href={deal.url} target="_blank" rel="noreferrer">
-          <ExternalLink size={17} />
-          <span>{t('openDeal')}</span>
+          <span>{t('openDeal')}</span><ArrowUpRight size={17} aria-hidden="true" />
         </a>
         {deal.steamAppId && !deal.isFree && priceScope === 'country' ? (
-          <button type="button" className="ghost-link" onClick={() => onRegionScan(deal)} disabled={isScanning}>
+          <button type="button" className="ghost-link region-action" onClick={() => onRegionScan(deal)} disabled={isScanning} title={t('regional')} aria-label={isScanning ? t('scanningRegions') : t('regional')}>
             <Globe2 size={16} className={isScanning ? 'spin' : ''} />
-            <span>{isScanning ? t('scanningRegions') : t('regional')}</span>
+
           </button>
         ) : null}
-        <button type="button" className={`ghost-link ${isWatched ? 'watching' : ''}`} onClick={() => onToggleWatch(deal)}>
-          {isWatched ? <EyeOff size={16} /> : <Eye size={16} />}
-          <span>{isWatched ? t('watching') : t('watch')}</span>
+        <button type="button" className={`ghost-link watch-action ${isWatched ? 'watching' : ''}`} aria-label={isWatched ? t('watching') : t('watch')} title={isWatched ? t('watching') : t('watch')} aria-pressed={isWatched} onClick={() => onToggleWatch(deal)}>
+          <Bookmark size={17} fill={isWatched ? 'currentColor' : 'none'} />
         </button>
-        <button type="button" className="ghost-link" onClick={() => onOpenDetail(deal)}><BarChart3 size={16} /><span>{t('gameSheet')}</span></button>
+
         <div className="deal-action-icons">
           <button type="button" className={`ghost-link icon-action ${copied ? 'copied' : ''}`} onClick={copyLink} title={copied ? t('copiedLink') : t('copyLink')} aria-label={copied ? t('copiedLink') : t('copyLink')}>
             {copied ? <Check size={16} /> : <Copy size={16} />}
@@ -1633,7 +1649,7 @@ function DealRow({ deal, country, priceScope, index, isWatched, isScanning, alte
           </button>
         </div>
       </div>
-    </motion.article>
+    </article>
   )
 }
 
